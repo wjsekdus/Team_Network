@@ -1,0 +1,12 @@
+// Apple 개발자 Team ID (Xcode > Signing 에서 확인). 비워 두면 서명 없이 시뮬레이터 빌드만 가능.
+TEAM_ID=
+BUNDLE_ID=com.nettwork.policethief
+APP_NAME=경찰과 도둑
+
+// 서버 주소. xcconfig 에서는 "//" 가 주석으로 해석되므로 "https:/$()/주소" 형식으로 적는다.
+// 예) 시뮬레이터 → PC 서버:   SERVER_BASE_URL = http:/$()/localhost:8080
+//     외부(Cloudflare Tunnel): SERVER_BASE_URL = https:/$()/abc-def.trycloudflare.com
+SERVER_BASE_URL = http:/$()/localhost:8080
+
+// 개인 설정(커밋하지 않음)이 있으면 위 값을 덮어쓴다. 예: Local.xcconfig 에 SERVER_BASE_URL 지정
+#include? "Local.xcconfig"
