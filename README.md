@@ -119,16 +119,4 @@ copy server\.env.example server\.env      # 값 수정 (PNT_DB_PASSWORD 등)
 
 최근 실행 결과(72개 테스트 PASS, iOS 앱 빌드 BLOCKED 등)는 [TEST_REPORT.md](docs/testing/TEST_REPORT.md) 를 보세요.
 
-## Git 시작하기
-
-이 폴더에는 `git init` 만 되어 있고 커밋은 없습니다. 팀 저장소에 올릴 때:
-
-```powershell
-git add .
-git update-index --chmod=+x gradlew     # Linux CI 에서 실행 권한
-git commit -m "chore: 초기 프로젝트 구성"
-git remote add origin https://github.com/<팀>/<저장소>.git
-git push -u origin main
-```
-
 `server/.env`, `local.properties`, `iosApp/Configuration/Local.xcconfig` 는 `.gitignore` 로 제외됩니다. 비밀번호·토큰을 다른 파일에 적지 마세요.
