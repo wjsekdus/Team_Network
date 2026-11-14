@@ -51,12 +51,18 @@ data class GameMapState(
     val jail: GeoPoint? = null,
     val jailRadiusMeters: Double? = null,
     val markers: List<MapMarker> = emptyList(),
+    /** 초기 구역(축소 전). 현재 구역보다 크면 점선으로 함께 그린다. */
+    val initialZoneRadiusMeters: Double? = null,
+    /** 도둑 미션 구역(도둑에게만 내려온다). */
+    val mission: GeoPoint? = null,
+    val missionRadiusMeters: Double? = null,
 ) {
     /** 스크린리더용 지도 요약(지도 내용은 시각 정보뿐이므로 텍스트로 대신 제공). */
     fun accessibilitySummary(): String = buildString {
         append("지도. ")
         zoneRadiusMeters?.let { append("게임 구역 반경 ${it.toInt()}미터. ") }
         if (jail != null) append("감옥이 구역 중심에 있음. ")
+        if (mission != null) append("미션 구역 표시됨. ")
         markers.groupBy { it.kind }.forEach { (kind, list) ->
             val name = when (kind) { MarkerKind.ME -> "내 위치"; MarkerKind.POLICE -> "경찰"; MarkerKind.THIEF -> "도둑" }
             append("$name ${list.size}명: ${list.joinToString { it.label }}. ")
@@ -106,7 +112,7 @@ fun SchematicMap(state: GameMapState, modifier: Modifier = Modifier) {
     val center = state.center ?: state.markers.firstOrNull()?.position
     Canvas(modifier.background(AppColors.Surface)) {
         if (center == null) return@Canvas
-        val viewRadiusMeters = (state.zoneRadiusMeters ?: 300.0) * 1.15
+        val viewRadiusMeters = (state.initialZoneRadiusMeters ?: state.zoneRadiusMeters ?: 300.0) * 1.15
         val scale = (min(size.width, size.height) / 2f) / viewRadiusMeters.toFloat()
         val metersPerDegLat = 111_195.0
         val metersPerDegLon = metersPerDegLat * cos(center.latitude * kotlin.math.PI / 180)
@@ -114,6 +120,14 @@ fun SchematicMap(state: GameMapState, modifier: Modifier = Modifier) {
             x = size.width / 2 + ((p.longitude - center.longitude) * metersPerDegLon * scale).toFloat(),
             y = size.height / 2 - ((p.latitude - center.latitude) * metersPerDegLat * scale).toFloat(),
         )
+        state.initialZoneRadiusMeters?.takeIf { initial -> state.zoneRadiusMeters?.let { initial > it } == true }?.let { r ->
+            drawCircle(AppColors.TextSecondary, radius = (r * scale).toFloat(), center = toOffset(center), style = Stroke(width = 2f))
+        }
+        state.mission?.let { m ->
+            val r = ((state.missionRadiusMeters ?: 30.0) * scale).toFloat().coerceAtLeast(10f)
+            drawCircle(AppColors.Success.copy(alpha = 0.25f), radius = r, center = toOffset(m))
+            drawCircle(AppColors.Success, radius = r, center = toOffset(m), style = Stroke(width = 3f))
+        }
         state.zoneRadiusMeters?.let { r ->
             drawCircle(AppColors.TextPrimary.copy(alpha = 0.06f), radius = (r * scale).toFloat(), center = toOffset(center))
             drawCircle(AppColors.TextPrimary, radius = (r * scale).toFloat(), center = toOffset(center), style = Stroke(width = 3f))

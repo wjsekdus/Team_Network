@@ -27,14 +27,20 @@ import com.nettwork.policethief.core.EpochClock
 import com.nettwork.policethief.domain.model.AppError
 import com.nettwork.policethief.domain.model.AppResult
 import com.nettwork.policethief.domain.model.GamePlayer
+import com.nettwork.policethief.domain.model.QrScanResult
 import com.nettwork.policethief.domain.model.QrToken
 import com.nettwork.policethief.domain.repository.AuthRepository
 import com.nettwork.policethief.domain.repository.GameRepository
+import com.nettwork.policethief.domain.repository.GameSessionRepository
 import com.nettwork.policethief.domain.repository.MockGameController
 import com.nettwork.policethief.platform.AppPermission
 import com.nettwork.policethief.platform.PermissionController
 import com.nettwork.policethief.platform.PermissionState
 import com.nettwork.policethief.platform.QrCodeImage
+import com.nettwork.policethief.platform.QrScannerView
+import com.nettwork.policethief.shared.model.GameResult
+import com.nettwork.policethief.shared.model.ScanRejectReason
+import kotlinx.coroutines.flow.filterNotNull
 import com.nettwork.policethief.platform.rememberPermissionRequester
 import com.nettwork.policethief.presentation.components.ConfirmDialog
 import com.nettwork.policethief.presentation.components.EmptyState
@@ -79,17 +85,20 @@ data class QrScanUiState(
     val phase: ScanPhase = ScanPhase.Ready,
     val showEscortLimitDialog: Boolean = false,
     val lastScannedToken: String? = null,
+    val gameEnded: Boolean = false,
 ) {
     val isPolice: Boolean get() = me?.role == PlayerRole.POLICE
     val title: String get() = if (isPolice) "도둑 QR 스캔" else "동료 구출 QR 스캔"
 }
 
 /**
- * QR 스캔. 경찰은 체포(capture), 미체포 도둑은 구출(rescue) 요청을 서버에 보낸다.
- * 실제 카메라 인식은 TODO(QR): CameraX + ML Kit(Android), AVFoundation(iOS). 지금은 Mock 스캔 버튼으로 흐름만 확인한다.
+ * QR 스캔. 경찰은 체포(capture), 미체포 도둑은 구출(rescue) 요청을 서버에 보낸다. 판정은 서버가 한다.
+ * 카메라는 같은 QR 을 1초에 여러 번 인식하므로, 판정 중이거나 결과를 보여 주는 동안 들어온 인식은 무시한다.
+ * 통신 실패 후 [retryLast] 는 같은 requestId 로 다시 보내므로(RemoteGameRepository) 서버가 두 번 체포하지 않는다.
  */
 class QrScanViewModel(
     private val gameId: String,
+    private val session: GameSessionRepository,
     private val games: GameRepository,
     private val auth: AuthRepository,
     private val permissions: PermissionController,
@@ -100,12 +109,18 @@ class QrScanViewModel(
     val uiState: StateFlow<QrScanUiState> = state.asStateFlow()
 
     init {
+        session.start(gameId)
         viewModelScope.launch {
-            when (val result = games.getGame(gameId)) {
-                is AppResult.Success -> state.update { s ->
-                    s.copy(me = result.value.players.firstOrNull { it.userId == auth.currentUser.value?.userId } ?: result.value.players.firstOrNull())
+            session.state.filterNotNull().collect { s ->
+                if (s.gameId != gameId) return@collect
+                val game = s.snapshot?.game
+                state.update {
+                    it.copy(
+                        me = game?.players?.firstOrNull { p -> p.userId == auth.currentUser.value?.userId } ?: it.me,
+                        loadError = if (game == null) s.syncError else null,
+                        gameEnded = game?.isEnded == true,
+                    )
                 }
-                is AppResult.Failure -> state.update { it.copy(loadError = result.error.userMessage) }
             }
         }
     }
@@ -115,17 +130,17 @@ class QrScanViewModel(
     fun refreshPermission() = state.update { it.copy(cameraPermission = permissions.status(AppPermission.CAMERA)) }
 
     fun onScanned(token: String) {
-        if (state.value.phase == ScanPhase.Verifying) return // 중복 요청 방지
+        val current = state.value
+        if (current.phase != ScanPhase.Ready || current.me == null || current.showEscortLimitDialog) return // 중복 요청 방지
+        val isPolice = current.isPolice
         state.update { it.copy(phase = ScanPhase.Verifying, lastScannedToken = token) }
         viewModelScope.launch {
-            val result = if (state.value.isPolice) games.capture(gameId, token) else games.rescue(gameId, token)
+            val result = if (isPolice) games.capture(gameId, token) else games.rescue(gameId, token)
             state.update { s ->
                 when (result) {
                     is AppResult.Success -> when {
-                        result.value.accepted -> s.copy(
-                            phase = ScanPhase.Accepted(if (s.isPolice) "체포 확정! 감옥으로 호송하세요." else "구출 성공! 동료가 다시 자유로워졌습니다."),
-                        )
-                        result.value.rejectReason == "ESCORT_LIMIT" -> s.copy(phase = ScanPhase.Ready, showEscortLimitDialog = true)
+                        result.value.accepted -> s.copy(phase = ScanPhase.Accepted(acceptMessage(isPolice, result.value)))
+                        result.value.rejectReason == ScanRejectReason.ESCORT_LIMIT -> s.copy(phase = ScanPhase.Ready, showEscortLimitDialog = true)
                         else -> s.copy(phase = ScanPhase.Rejected(rejectMessage(result.value.rejectReason)))
                     }
                     is AppResult.Failure -> when (result.error) {
@@ -134,10 +149,11 @@ class QrScanViewModel(
                     }
                 }
             }
+            if (result is AppResult.Success) session.refresh()
         }
     }
 
-    /** 통신 실패 후 같은 토큰으로 재검증. 서버는 requestId 로 중복 처리를 막아야 한다(TODO 서버 구현). */
+    /** 통신 실패 후 같은 토큰으로 재검증(같은 requestId 로 보내므로 서버가 중복 처리하지 않는다). */
     fun retryLast() {
         state.value.lastScannedToken?.let {
             state.update { s -> s.copy(phase = ScanPhase.Ready) }
@@ -149,13 +165,26 @@ class QrScanViewModel(
 
     fun dismissEscortDialog() = state.update { it.copy(showEscortLimitDialog = false) }
 
-    private fun rejectMessage(reason: String?) = when (reason) {
-        "OTHER_GAME" -> "다른 경기의 QR 입니다."
-        "ALREADY_CAPTURED" -> "이미 체포된 도둑입니다."
-        "TARGET_ESCORTED" -> "호송 중인 도둑은 구출할 수 없습니다."
-        "TARGET_NOT_JAILED" -> "수감된 동료만 구출할 수 있습니다."
-        "NOT_ALLOWED" -> "지금은 이 스캔 권한이 없습니다."
-        else -> "유효하지 않은 QR 입니다."
+    private fun acceptMessage(isPolice: Boolean, result: QrScanResult): String {
+        val name = result.targetNickname ?: "대상"
+        return when {
+            isPolice && result.gameResult == GameResult.POLICE_WIN -> "$name 체포! 도둑 2명을 모두 잡아 경찰이 승리했습니다."
+            isPolice -> "$name 체포 확정! 감옥(구역 중심)으로 함께 이동하세요."
+            else -> "$name 구출 성공! 동료가 다시 자유로워졌습니다."
+        }
+    }
+
+    private fun rejectMessage(reason: ScanRejectReason?) = when (reason) {
+        ScanRejectReason.OTHER_GAME -> "다른 경기의 QR 입니다."
+        ScanRejectReason.ALREADY_CAPTURED -> "이미 체포된 도둑입니다."
+        ScanRejectReason.TARGET_ESCORTED -> "호송 중인 도둑은 구출할 수 없습니다."
+        ScanRejectReason.TARGET_NOT_JAILED -> "수감된 동료만 구출할 수 있습니다."
+        ScanRejectReason.NOT_ALLOWED -> "지금은 이 스캔 권한이 없습니다."
+        ScanRejectReason.SELF_SCAN -> "자신의 QR 은 스캔할 수 없습니다."
+        ScanRejectReason.RESCUER_NOT_ACTIVE -> "체포된 상태에서는 동료를 구출할 수 없습니다."
+        ScanRejectReason.GAME_NOT_PLAYING -> "경기가 진행 중이 아닙니다."
+        ScanRejectReason.ESCORT_LIMIT -> "이미 도둑 1명을 호송 중입니다."
+        ScanRejectReason.INVALID_TOKEN, null -> "유효하지 않은 QR 입니다."
     }
 }
 
@@ -185,12 +214,9 @@ fun QrScanScreen(gameId: String, onClose: () -> Unit) {
             Modifier.fillMaxWidth().aspectRatio(1f).background(AppColors.Surface, RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            when (state.cameraPermission) {
-                PermissionState.GRANTED -> Text(
-                    "카메라 QR 인식은 아직 구현되지 않았습니다.\n(TODO: CameraX + ML Kit / AVFoundation)",
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(16.dp),
-                )
+            when {
+                state.gameEnded -> Text("경기가 끝나 더 이상 스캔할 수 없습니다.", textAlign = TextAlign.Center, modifier = Modifier.padding(16.dp))
+                state.cameraPermission == PermissionState.GRANTED -> QrScannerView(onScanned = viewModel::onScanned, modifier = Modifier.fillMaxWidth().aspectRatio(1f))
                 else -> EmptyState(message = "QR 스캔에는 카메라 권한이 필요합니다.", actionLabel = "카메라 권한 요청", onAction = requestCamera)
             }
         }
@@ -229,9 +255,11 @@ sealed interface MyQrUiState {
     data class Ready(val token: QrToken, val myStatus: PlayerStatus?) : MyQrUiState
 }
 
+/** 내 QR: 서버가 발급한 경기 전용 고정 토큰. 내 상태(체포·수감)는 동기화 상태에서 실시간으로 바꿔 보여 준다. */
 class MyQrViewModel(
     private val gameId: String,
     private val games: GameRepository,
+    private val session: GameSessionRepository,
     private val auth: AuthRepository,
     val isMock: Boolean,
 ) : ViewModel() {
@@ -239,7 +267,16 @@ class MyQrViewModel(
     val uiState: StateFlow<MyQrUiState> = state.asStateFlow()
 
     init {
+        session.start(gameId)
         load()
+        viewModelScope.launch {
+            session.state.filterNotNull().collect { s ->
+                val status = s.snapshot?.game?.players?.firstOrNull { it.userId == auth.currentUser.value?.userId }?.status
+                state.update { current -> if (current is MyQrUiState.Ready) current.copy(myStatus = status) else current }
+                // 경기가 끝나면 서버가 토큰을 폐기하므로 화면에서도 QR 을 내린다.
+                if (s.snapshot?.game?.isEnded == true) state.value = MyQrUiState.Failed("경기가 끝나 QR 이 더 이상 유효하지 않습니다.")
+            }
+        }
     }
 
     fun load() {
@@ -247,8 +284,7 @@ class MyQrViewModel(
         viewModelScope.launch {
             state.value = when (val token = games.myQrToken(gameId)) {
                 is AppResult.Success -> {
-                    val status = (games.getGame(gameId) as? AppResult.Success)?.value?.players
-                        ?.firstOrNull { it.userId == auth.currentUser.value?.userId }?.status
+                    val status = session.state.value?.snapshot?.game?.players?.firstOrNull { it.userId == auth.currentUser.value?.userId }?.status
                     MyQrUiState.Ready(token.value, status)
                 }
                 is AppResult.Failure -> MyQrUiState.Failed(token.error.userMessage)

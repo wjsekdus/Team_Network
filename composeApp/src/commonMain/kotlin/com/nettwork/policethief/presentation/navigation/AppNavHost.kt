@@ -51,6 +51,14 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
                 onStartMatchmaking = { navController.navigate(MatchmakingRoute) },
                 onOpenSettings = { navController.navigate(SettingsRoute) },
                 onOpenPermissions = { navController.navigate(PermissionRoute) },
+                onResumeGame = { target ->
+                    val route: Any = when {
+                        !target.started -> RoleRevealRoute(target.gameId)
+                        target.role == PlayerRole.POLICE -> PoliceMapRoute(target.gameId)
+                        else -> ThiefMapRoute(target.gameId)
+                    }
+                    navController.navigate(route) { popUpTo(HomeRoute) }
+                },
             )
         }
         composable<MatchmakingRoute> {

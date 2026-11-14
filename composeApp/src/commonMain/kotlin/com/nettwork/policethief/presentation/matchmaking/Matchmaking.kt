@@ -21,6 +21,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nettwork.policethief.core.EpochClock
+import com.nettwork.policethief.domain.model.AppError
 import com.nettwork.policethief.domain.model.AppResult
 import com.nettwork.policethief.domain.model.LocationFailureReason
 import com.nettwork.policethief.domain.repository.LocationRepository
@@ -57,7 +58,7 @@ sealed interface MatchmakingUiState {
     data object Locating : MatchmakingUiState
 
     /** 기본: 4명 미만 대기. dropped = true 면 부분 상태("참가자가 나가 n/4명"). */
-    data class Waiting(val count: Int, val elapsedMillis: Long, val dropped: Boolean) : MatchmakingUiState
+    data class Waiting(val count: Int, val elapsedMillis: Long, val dropped: Boolean, val remainingMillis: Long = 0) : MatchmakingUiState
 
     /** 비어 있음: 10분 내 참가자 확보 실패. */
     data object TimedOut : MatchmakingUiState
@@ -106,12 +107,26 @@ class MatchmakingViewModel(
             val joined = when (val result = matchmaking.join(location)) {
                 is AppResult.Success -> result.value
                 is AppResult.Failure -> {
-                    state.value = MatchmakingUiState.Failed(result.error.userMessage, needsLocationSettings = false)
+                    val error = result.error
+                    // 이미 진행 중인 경기가 있으면(앱 재실행 등) 그 경기로 돌아간다.
+                    val existing = (error as? AppError.Server)?.takeIf { it.reason == "ALREADY_IN_GAME" }
+                        ?.let { (matchmaking.refresh() as? AppResult.Success)?.value?.gameId }
+                    if (existing != null) {
+                        eventChannel.send(MatchmakingEvent.Matched(existing))
+                    } else {
+                        state.value = MatchmakingUiState.Failed(error.userMessage, needsLocationSettings = false)
+                    }
                     return@launch
                 }
             }
             var maxCount = joined.nearbyWaitingCount
+            var lastRefresh = 0L
             while (isActive) {
+                // WebSocket 알림을 놓쳐도 서버 상태를 따라가도록 3초마다 다시 확인한다.
+                if (!isMock && clock.nowMillis() - lastRefresh >= REFRESH_INTERVAL_MILLIS) {
+                    matchmaking.refresh()
+                    lastRefresh = clock.nowMillis()
+                }
                 val ticket = matchmaking.ticket.value ?: joined
                 val now = clock.nowMillis()
                 when {
@@ -119,20 +134,34 @@ class MatchmakingViewModel(
                         eventChannel.send(MatchmakingEvent.Matched(ticket.gameId))
                         return@launch
                     }
-                    ticket.status == MatchmakingStatus.EXPIRED || now >= ticket.expiresAtEpochMillis -> {
-                        matchmaking.cancel()
+                    // 만료는 서버가 확정한다(EXPIRED). 서버 응답이 늦어도 화면은 10분이 지나면 실패로 보여 준다.
+                    ticket.status == MatchmakingStatus.EXPIRED || (ticket.expiresAtEpochMillis > 0 && now >= ticket.expiresAtEpochMillis) -> {
+                        if (ticket.status != MatchmakingStatus.EXPIRED) matchmaking.cancel()
                         state.value = MatchmakingUiState.TimedOut
+                        return@launch
+                    }
+                    ticket.status == MatchmakingStatus.CANCELLED || ticket.status == MatchmakingStatus.IDLE -> {
+                        state.value = MatchmakingUiState.Failed("매칭 대기가 종료되었습니다. 다시 시도해 주세요.", needsLocationSettings = false)
                         return@launch
                     }
                     else -> {
                         val dropped = ticket.nearbyWaitingCount < maxCount
                         maxCount = maxOf(maxCount, ticket.nearbyWaitingCount)
-                        state.value = MatchmakingUiState.Waiting(ticket.nearbyWaitingCount, now - ticket.joinedAtEpochMillis, dropped)
+                        state.value = MatchmakingUiState.Waiting(
+                            count = ticket.nearbyWaitingCount,
+                            elapsedMillis = now - ticket.joinedAtEpochMillis,
+                            dropped = dropped,
+                            remainingMillis = (ticket.expiresAtEpochMillis - now).coerceAtLeast(0),
+                        )
                     }
                 }
                 delay(500)
             }
         }
+    }
+
+    private companion object {
+        const val REFRESH_INTERVAL_MILLIS = 3_000L
     }
 
     /** D-01 확인 후 호출. 서버 취소가 확정된 뒤 홈으로 돌아간다. */
@@ -193,7 +222,7 @@ fun MatchmakingScreen(
                     },
                 )
                 Text(
-                    "경과 ${formatRemaining(s.elapsedMillis)} / 최대 ${GameRules.MATCH_TIMEOUT_MILLIS / 60_000}분",
+                    "경과 ${formatRemaining(s.elapsedMillis)} · 남은 시간 ${formatRemaining(s.remainingMillis)} (최대 ${GameRules.MATCH_TIMEOUT_MILLIS / 60_000}분)",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(24.dp))

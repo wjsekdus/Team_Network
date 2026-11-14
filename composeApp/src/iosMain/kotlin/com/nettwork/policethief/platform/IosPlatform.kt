@@ -2,7 +2,20 @@ package com.nettwork.policethief.platform
 
 import com.nettwork.policethief.di.REAL_LOCATION_PROVIDER
 import com.nettwork.policethief.domain.model.PlayerLocation
+import com.nettwork.policethief.domain.repository.LocationRepository
 import com.nettwork.policethief.shared.model.LocationSource
+import com.nettwork.policethief.shared.rules.GameRules
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
+import platform.AudioToolbox.AudioServicesPlaySystemSound
+import platform.AudioToolbox.kSystemSoundID_Vibrate
+import platform.Foundation.NSUUID
+import platform.UserNotifications.UNMutableNotificationContent
+import platform.UserNotifications.UNNotificationRequest
+import platform.UserNotifications.UNUserNotificationCenter
 import com.russhwolf.settings.ExperimentalSettingsImplementation
 import com.russhwolf.settings.KeychainSettings
 import com.russhwolf.settings.NSUserDefaultsSettings
@@ -47,6 +60,7 @@ fun iosPlatformModule() = module {
     single<PermissionController> { IosPermissionController() }
     single<LocationProvider>(REAL_LOCATION_PROVIDER) { RealLocationProvider() }
     single<BackgroundLocationController> { IosBackgroundLocationController() }
+    single<GameAlerts> { IosGameAlerts() }
 }
 
 /** Keychain 기반 토큰 저장소(multiplatform-settings 의 KeychainSettings 사용). */
@@ -125,13 +139,73 @@ private class OneShotLocationDelegate(private val result: CompletableDeferred<CL
 }
 
 /**
- * TODO(iOS 백그라운드 위치): Info.plist UIBackgroundModes=location +
- * CLLocationManager.allowsBackgroundLocationUpdates / startUpdatingLocation 으로 구현 예정.
- * iOS 는 앱이 일시 중단되면 주기 실행이 보장되지 않는다. 구현 전까지 미지원으로 표시한다.
+ * iOS 백그라운드 위치: Info.plist UIBackgroundModes=location + allowsBackgroundLocationUpdates 로
+ * 앱이 백그라운드로 가도 위치 업데이트를 계속 받고, 약 15초마다 서버로 보낸다.
+ * ⚠️ macOS 에서 검증 필요. iOS 는 앱을 일시 중단·종료할 수 있어 15초 주기가 보장되지 않는다.
+ * "앱 사용 중 허용"만 받은 경우 백그라운드 전환 시 상태 표시줄에 위치 사용 표시가 나타난다.
  */
-class IosBackgroundLocationController : BackgroundLocationController {
-    override val isSupported: Boolean = false
-    override val isRunning: StateFlow<Boolean> = MutableStateFlow(false)
-    override fun start() = Unit
-    override fun stop() = Unit
+@OptIn(ExperimentalForeignApi::class)
+class IosBackgroundLocationController : BackgroundLocationController, KoinComponent {
+    private val locations: LocationRepository by inject()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val running = MutableStateFlow(false)
+    override val isSupported: Boolean = true
+    override val isRunning: StateFlow<Boolean> = running
+
+    private var manager: CLLocationManager? = null
+    private var lastSentAtMillis = 0L
+    private val delegate = object : NSObject(), CLLocationManagerDelegateProtocol {
+        override fun locationManager(manager: CLLocationManager, didUpdateLocations: List<*>) {
+            val location = didUpdateLocations.lastOrNull() as? CLLocation ?: return
+            val now = (platform.Foundation.NSDate().timeIntervalSince1970 * 1000).toLong()
+            if (now - lastSentAtMillis < GameRules.LOCATION_UPDATE_INTERVAL_MILLIS) return
+            lastSentAtMillis = now
+            val sample = location.coordinate.useContents {
+                PlayerLocation(null, latitude, longitude, location.horizontalAccuracy, (location.timestamp.timeIntervalSince1970 * 1000).toLong(), LocationSource.GPS)
+            }
+            scope.launch { locations.sendLocation(sample) }
+        }
+    }
+
+    override fun start() {
+        if (manager != null) return
+        val status = CLLocationManager().authorizationStatus
+        if (status != kCLAuthorizationStatusAuthorizedWhenInUse && status != kCLAuthorizationStatusAuthorizedAlways) return
+        manager = CLLocationManager().apply {
+            this.delegate = this@IosBackgroundLocationController.delegate
+            desiredAccuracy = kCLLocationAccuracyBest
+            distanceFilter = 5.0
+            allowsBackgroundLocationUpdates = true
+            pausesLocationUpdatesAutomatically = false
+            showsBackgroundLocationIndicator = true
+            startUpdatingLocation()
+        }
+        running.value = true
+    }
+
+    override fun stop() {
+        manager?.stopUpdatingLocation()
+        manager?.delegate = null
+        manager = null
+        running.value = false
+    }
+}
+
+/**
+ * iOS 경기 알림: 로컬 알림(UNUserNotificationCenter) + 시스템 진동.
+ * 앱이 화면에 떠 있을 때는 iOS 기본 동작상 배너가 뜨지 않으므로 앱 안 배너(NoticeHost)로 보인다. ⚠️ macOS 에서 검증 필요.
+ */
+class IosGameAlerts : GameAlerts {
+    override fun notify(title: String, message: String) {
+        val content = UNMutableNotificationContent().apply {
+            setTitle(title)
+            setBody(message)
+        }
+        val request = UNNotificationRequest.requestWithIdentifier(NSUUID().UUIDString, content, null)
+        UNUserNotificationCenter.currentNotificationCenter().addNotificationRequest(request, withCompletionHandler = null)
+    }
+
+    override fun vibrate() {
+        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    }
 }

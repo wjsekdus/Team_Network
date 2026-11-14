@@ -3,7 +3,7 @@ package com.nettwork.policethief.presentation.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nettwork.policethief.config.AppConfig
-import com.nettwork.policethief.data.local.DevSettingsStore
+import com.nettwork.policethief.domain.repository.DevSettingsRepository
 import com.nettwork.policethief.domain.model.AppError
 import com.nettwork.policethief.domain.model.AppResult
 import com.nettwork.policethief.domain.model.LocationFailureReason
@@ -13,17 +13,26 @@ import com.nettwork.policethief.domain.model.RealtimeEvent
 import com.nettwork.policethief.domain.model.ServerStatus
 import com.nettwork.policethief.domain.model.User
 import com.nettwork.policethief.domain.repository.AuthRepository
+import com.nettwork.policethief.domain.repository.GameRepository
 import com.nettwork.policethief.domain.repository.LocationRepository
 import com.nettwork.policethief.domain.repository.RealtimeRepository
 import com.nettwork.policethief.domain.usecase.CheckServerStatusUseCase
 import com.nettwork.policethief.domain.usecase.locationReason
+import com.nettwork.policethief.shared.model.GameStatus
+import com.nettwork.policethief.shared.model.PlayerRole
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** 앱 재실행 시 돌아갈 경기. started = false 면 준비(역할 공개) 화면, true 면 역할별 지도. */
+data class ResumeTarget(val gameId: String, val started: Boolean, val role: PlayerRole)
 
 /** 서버 연결 상태(REST). */
 sealed interface ServerUiState {
@@ -63,9 +72,15 @@ class HomeViewModel(
     private val checkServer: CheckServerStatusUseCase,
     private val locations: LocationRepository,
     private val realtime: RealtimeRepository,
-    devSettings: DevSettingsStore,
+    devSettings: DevSettingsRepository,
     config: AppConfig,
+    private val games: GameRepository,
 ) : ViewModel() {
+    private val resumeChannel = Channel<ResumeTarget>(Channel.CONFLATED)
+
+    /** 진행 중인 경기가 있을 때 한 번 내보낸다. */
+    val resume: Flow<ResumeTarget> = resumeChannel.receiveAsFlow()
+    private var resumeChecked = false
     private val local = MutableStateFlow(
         HomeUiState(
             isDevBuild = config.isDevBuild,
@@ -106,8 +121,19 @@ class HomeViewModel(
                 realtime.disconnect()
                 realtime.connect()
             }
-            if (server is ServerUiState.Online) auth.refreshMe()
+            if (server is ServerUiState.Online) {
+                auth.refreshMe()
+                checkActiveGame()
+            }
         }
+    }
+
+    private suspend fun checkActiveGame() {
+        if (resumeChecked) return
+        val game = (games.currentGame() as? AppResult.Success)?.value ?: return
+        resumeChecked = true
+        val me = game.players.firstOrNull { it.userId == auth.currentUser.value?.userId } ?: return
+        resumeChannel.send(ResumeTarget(game.gameId, started = game.status == GameStatus.PLAYING, role = me.role))
     }
 
     fun refreshLocation() {

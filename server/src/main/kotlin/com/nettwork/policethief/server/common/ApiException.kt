@@ -20,12 +20,9 @@ class ValidationException(message: String, details: Map<String, String> = emptyM
 class ForbiddenException(message: String, details: Map<String, String> = emptyMap()) :
     ApiException(HttpStatusCode.Forbidden, ErrorCode.FORBIDDEN, message, details)
 
-class NotFoundException(message: String) :
-    ApiException(HttpStatusCode.NotFound, ErrorCode.NOT_FOUND, message)
+class NotFoundException(message: String, details: Map<String, String> = emptyMap()) :
+    ApiException(HttpStatusCode.NotFound, ErrorCode.NOT_FOUND, message, details)
 
-/**
- * 계약(API 경로·DTO)만 정의되고 아직 구현되지 않은 기능.
- * 클라이언트가 "정상 동작"으로 오해하지 않도록 501 Not Implemented 로 응답한다.
- */
-class NotImplementedFeatureException(feature: String) :
-    ApiException(HttpStatusCode.NotImplemented, ErrorCode.NOT_IMPLEMENTED, "아직 구현되지 않은 기능입니다: $feature")
+/** 현재 상태와 맞지 않는 요청(이미 경기 중, 이미 종료된 경기 등). details["reason"] 에 기계가 읽을 사유를 담는다. */
+class ConflictException(message: String, reason: String) :
+    ApiException(HttpStatusCode.Conflict, ErrorCode.CONFLICT, message, mapOf("reason" to reason))

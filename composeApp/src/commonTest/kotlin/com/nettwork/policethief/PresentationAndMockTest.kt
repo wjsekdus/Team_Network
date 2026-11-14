@@ -17,6 +17,7 @@ import com.nettwork.policethief.shared.model.GameStatus
 import com.nettwork.policethief.shared.model.MatchmakingStatus
 import com.nettwork.policethief.shared.model.PlayerRole
 import com.nettwork.policethief.shared.model.PlayerStatus
+import com.nettwork.policethief.shared.model.ScanRejectReason
 import com.nettwork.policethief.shared.rules.GameRules
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -168,7 +169,7 @@ class MockGameBackendTest {
         assertEquals(PlayerStatus.ESCORTED, first.targetStatus)
 
         val second = (backend.capture(game.gameId, thiefTokens[1]) as AppResult.Success).value
-        assertEquals("ESCORT_LIMIT", second.rejectReason)
+        assertEquals(ScanRejectReason.ESCORT_LIMIT, second.rejectReason)
 
         backend.simulateJailArrival(game.gameId)
         val third = (backend.capture(game.gameId, thiefTokens[1]) as AppResult.Success).value
@@ -181,7 +182,7 @@ class MockGameBackendTest {
     fun qrFromOtherGame_isRejected() = runTest {
         val (backend, game) = matchedGame(PlayerRole.POLICE)
         val result = (backend.capture(game.gameId, backend.sampleTokens(game.gameId).getValue("다른 경기의 QR")) as AppResult.Success).value
-        assertEquals("OTHER_GAME", result.rejectReason)
+        assertEquals(ScanRejectReason.OTHER_GAME, result.rejectReason)
     }
 
     @Test

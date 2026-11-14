@@ -5,8 +5,12 @@ import com.nettwork.policethief.domain.model.AppError
 import com.nettwork.policethief.domain.model.AppResult
 import com.nettwork.policethief.domain.model.Game
 import com.nettwork.policethief.domain.model.GamePlayer
+import com.nettwork.policethief.domain.model.GameResultSummary
+import com.nettwork.policethief.domain.model.GameSnapshot
 import com.nettwork.policethief.domain.model.MatchmakingTicket
 import com.nettwork.policethief.domain.model.PlayerLocation
+import com.nettwork.policethief.domain.model.PlayerResult
+import com.nettwork.policethief.shared.model.ScanRejectReason
 import com.nettwork.policethief.domain.model.QrScanResult
 import com.nettwork.policethief.domain.model.QrToken
 import com.nettwork.policethief.domain.repository.AuthRepository
@@ -80,9 +84,36 @@ class MockGameBackend(
         return AppResult.Success(Unit)
     }
 
+    override suspend fun refresh(): AppResult<MatchmakingTicket> =
+        AppResult.Success(ticketState.value ?: MatchmakingTicket(MatchmakingStatus.IDLE, 0, 0, 0, null))
+
     // ---------------- GameRepository ----------------
 
+    override suspend fun currentGame(): AppResult<Game?> =
+        AppResult.Success(games.values.map(::refreshStatus).lastOrNull { !it.isEnded })
+
     override suspend fun getGame(gameId: String): AppResult<Game> = withGame(gameId) { AppResult.Success(refreshStatus(it)) }
+
+    override suspend fun state(gameId: String): AppResult<GameSnapshot> = withGame(gameId) { stored ->
+        val game = refreshStatus(stored)
+        val locations = (visibleLocations(gameId) as? AppResult.Success)?.value.orEmpty()
+        AppResult.Success(GameSnapshot(game, if (game.isEnded) emptyList() else locations, emptyList(), 0))
+    }
+
+    override suspend fun result(gameId: String): AppResult<GameResultSummary> = withGame(gameId) { stored ->
+        val game = refreshStatus(stored)
+        AppResult.Success(
+            GameResultSummary(
+                gameId = game.gameId,
+                status = game.status,
+                result = game.result,
+                endReason = game.endReason,
+                startedAtEpochMillis = game.startsAtEpochMillis,
+                endedAtEpochMillis = game.endedAtEpochMillis,
+                players = game.players.map { PlayerResult(it.userId, it.nickname, it.role, it.status, 0, 0, 0, 0, it.warningCount) },
+            ),
+        )
+    }
 
     /**
      * 서버 규칙을 흉내 낸 공개 범위: 준비 단계(READY)에는 4명 최초 위치 전원 공개(S-07),
@@ -106,11 +137,12 @@ class MockGameBackend(
         val me = game.player(myId)
         val target = targetOf(game, scannedToken)
         val reject = when {
-            me?.role != PlayerRole.POLICE -> "NOT_ALLOWED"
-            !scannedToken.startsWith(tokenPrefix(game.gameId)) -> if (scannedToken.startsWith(TOKEN_PREFIX)) "OTHER_GAME" else "INVALID_TOKEN"
-            target == null || target.role != PlayerRole.THIEF -> "INVALID_TOKEN"
-            target.status != PlayerStatus.ACTIVE -> "ALREADY_CAPTURED"
-            game.players.count { it.capturedBy == myId && it.status == PlayerStatus.ESCORTED } >= GameRules.MAX_ESCORTS_PER_POLICE -> "ESCORT_LIMIT"
+            me?.role != PlayerRole.POLICE -> ScanRejectReason.NOT_ALLOWED
+            !scannedToken.startsWith(tokenPrefix(game.gameId)) ->
+                if (scannedToken.startsWith(TOKEN_PREFIX)) ScanRejectReason.OTHER_GAME else ScanRejectReason.INVALID_TOKEN
+            target == null || target.role != PlayerRole.THIEF -> ScanRejectReason.INVALID_TOKEN
+            target.status != PlayerStatus.ACTIVE -> ScanRejectReason.ALREADY_CAPTURED
+            game.players.count { it.capturedBy == myId && it.status == PlayerStatus.ESCORTED } >= GameRules.MAX_ESCORTS_PER_POLICE -> ScanRejectReason.ESCORT_LIMIT
             else -> null
         }
         if (reject != null) return@withGame AppResult.Success(QrScanResult(false, target?.userId, target?.status, reject))
@@ -128,11 +160,13 @@ class MockGameBackend(
         val me = game.player(myId)
         val target = targetOf(game, scannedToken)
         val reject = when {
-            me?.role != PlayerRole.THIEF || me.status != PlayerStatus.ACTIVE -> "NOT_ALLOWED"
-            !scannedToken.startsWith(tokenPrefix(game.gameId)) -> if (scannedToken.startsWith(TOKEN_PREFIX)) "OTHER_GAME" else "INVALID_TOKEN"
-            target == null || target.role != PlayerRole.THIEF -> "INVALID_TOKEN"
-            target.status == PlayerStatus.ESCORTED -> "TARGET_ESCORTED"
-            target.status != PlayerStatus.JAILED -> "TARGET_NOT_JAILED"
+            me?.role != PlayerRole.THIEF -> ScanRejectReason.NOT_ALLOWED
+            me.status != PlayerStatus.ACTIVE -> ScanRejectReason.RESCUER_NOT_ACTIVE
+            !scannedToken.startsWith(tokenPrefix(game.gameId)) ->
+                if (scannedToken.startsWith(TOKEN_PREFIX)) ScanRejectReason.OTHER_GAME else ScanRejectReason.INVALID_TOKEN
+            target == null || target.role != PlayerRole.THIEF -> ScanRejectReason.INVALID_TOKEN
+            target.status == PlayerStatus.ESCORTED -> ScanRejectReason.TARGET_ESCORTED
+            target.status != PlayerStatus.JAILED -> ScanRejectReason.TARGET_NOT_JAILED
             else -> null
         }
         if (reject != null) return@withGame AppResult.Success(QrScanResult(false, target?.userId, target?.status, reject))

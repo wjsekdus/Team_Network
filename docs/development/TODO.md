@@ -1,6 +1,8 @@
 # TODO — 미구현 기능과 작업 분담
 
-현재 상태: 공통 구조·기본 기능은 동작, 핵심 게임 로직은 **계약(인터페이스·DTO·API 경로)과 Mock** 만 있다.
+> **A 방식(기반 버전) 시점의 기록입니다.** B 방식 브랜치(`prototype/ai-complete`)에서는 아래 기능 대부분이 서버·앱에 구현되었습니다. 현재 상태는 `docs/testing/TEST_REPORT.md`, 분석 분담은 `docs/development/TEAM_ANALYSIS_GUIDE.md` 를 보세요.
+
+A 방식 당시 상태: 공통 구조·기본 기능은 동작, 핵심 게임 로직은 **계약(인터페이스·DTO·API 경로)과 Mock** 만 있다.
 서버 해당 API 는 모두 `501 NOT_IMPLEMENTED` 를 돌려주며, 앱은 개발 빌드에서 `MockGameBackend` 로 화면 흐름을 확인할 수 있다.
 
 ## 0. 공통 원칙

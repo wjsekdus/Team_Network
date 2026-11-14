@@ -31,8 +31,8 @@ sealed class AppError(val userMessage: String) {
     /** 위치 수집 실패. */
     class Location(message: String, val reason: LocationFailureReason) : AppError(message)
 
-    /** 서버가 오류를 돌려줌. */
-    class Server(val httpStatus: Int, message: String) : AppError(message)
+    /** 서버가 오류를 돌려줌. reason 은 서버 ErrorResponse.details["reason"](예: NO_ACTIVE_GAME, ALREADY_IN_GAME). */
+    class Server(val httpStatus: Int, message: String, val reason: String? = null) : AppError(message)
 
     class Unknown(detail: String?) : AppError("알 수 없는 오류가 발생했습니다." + (detail?.let { "\n($it)" } ?: ""))
 }

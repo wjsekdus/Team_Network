@@ -56,8 +56,12 @@ class WebSocketRealtimeRepository(
     private var connectionJob: Job? = null
     private var session: DefaultClientWebSocketSession? = null
 
+    /** 서버가 session_replaced 를 보냈는지. true 면 재연결하지 않는다(사용자가 직접 다시 연결). */
+    private var sessionReplaced = false
+
     override fun connect() {
         if (connectionJob?.isActive == true) return
+        sessionReplaced = false
         connectionJob = scope.launch { runConnectionLoop() }
     }
 
@@ -117,6 +121,10 @@ class WebSocketRealtimeRepository(
             } finally {
                 session = null
             }
+            if (sessionReplaced) {
+                state.value = RealtimeConnectionState.Failed(AppError.Server(409, "다른 기기에서 같은 계정으로 접속해 연결이 끊겼습니다.", "SESSION_REPLACED"))
+                return
+            }
 
             attempt++
             if (attempt > MAX_RECONNECT_ATTEMPTS) {
@@ -133,10 +141,17 @@ class WebSocketRealtimeRepository(
         val now = clock.nowMillis()
         val event = try {
             when (val message = ApiJson.decodeFromString(ServerMessage.serializer(), text)) {
-                is ServerMessage.Welcome -> RealtimeEvent.Welcome(message.userId, now)
+                is ServerMessage.Welcome -> RealtimeEvent.Welcome(message.userId, now, message.activeGameId, message.serverTimeEpochMillis)
                 is ServerMessage.TestEvent -> RealtimeEvent.TestEvent(message.sequence, message.message, now)
                 is ServerMessage.Pong -> RealtimeEvent.Pong(now - message.clientTimeEpochMillis, now)
                 is ServerMessage.GameEventPush -> RealtimeEvent.Game(message.event.toDomain(), now)
+                is ServerMessage.MatchmakingUpdate -> RealtimeEvent.Matchmaking(message.event, message.ticket.toDomain(), now)
+                is ServerMessage.PlayerLocation -> RealtimeEvent.Location(message.gameId, message.location.toDomain(), now)
+                is ServerMessage.SessionReplaced -> {
+                    // 다른 기기에서 같은 계정으로 접속함: 재연결하면 서로 밀어내므로 멈춘다.
+                    sessionReplaced = true
+                    RealtimeEvent.SessionReplaced(message.message, now)
+                }
                 is ServerMessage.Error -> RealtimeEvent.ServerError(message.message, now)
             }
         } catch (e: SerializationException) {

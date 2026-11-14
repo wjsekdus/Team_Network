@@ -29,6 +29,7 @@ import com.nettwork.policethief.domain.model.GamePlayer
 import com.nettwork.policethief.domain.model.PlayerLocation
 import com.nettwork.policethief.domain.repository.AuthRepository
 import com.nettwork.policethief.domain.repository.GameRepository
+import com.nettwork.policethief.domain.repository.GameSessionRepository
 import com.nettwork.policethief.platform.PlatformBackHandler
 import com.nettwork.policethief.platform.map.GameMap
 import com.nettwork.policethief.platform.map.GameMapState
@@ -78,6 +79,7 @@ sealed interface PrepareUiState {
         val millisToStart: Long,
         /** 부분 상태: 역할은 확정됐지만 위치 정보가 아직 다 오지 않음. */
         val positionsPartial: Boolean,
+        val myLocation: PlayerLocation? = null,
     ) : PrepareUiState
 }
 
@@ -86,11 +88,15 @@ sealed interface PrepareEvent {
     data object LeftGame : PrepareEvent
 }
 
-/** 역할 공개·구역 확인. 서버(현재 Mock)가 정한 시작 시각까지 1초마다 카운트다운하고, 시작되면 역할별 지도로 이동한다. */
+/**
+ * 역할 공개·구역 확인. 서버가 정한 시작 시각(서버 시계 기준)까지 1초마다 카운트다운하고,
+ * 서버 상태가 PLAYING 이 되면(버튼이 아니라 서버 확정 기준) 역할별 지도로 이동한다.
+ */
 class GameSessionViewModel(
     private val gameId: String,
-    private val games: GameRepository,
+    private val session: GameSessionRepository,
     private val auth: AuthRepository,
+    private val games: GameRepository,
     private val clock: EpochClock,
     val isMock: Boolean,
 ) : ViewModel() {
@@ -100,53 +106,69 @@ class GameSessionViewModel(
     private val eventChannel = Channel<PrepareEvent>(Channel.BUFFERED)
     val events: Flow<PrepareEvent> = eventChannel.receiveAsFlow()
 
-    init {
-        load()
-    }
+    private var finished = false
 
-    fun load() {
-        state.value = PrepareUiState.Loading
+    init {
+        session.start(gameId)
         viewModelScope.launch {
-            while (isActive) {
-                val game = when (val result = games.getGame(gameId)) {
-                    is AppResult.Success -> result.value
-                    is AppResult.Failure -> {
-                        state.value = PrepareUiState.Failed(result.error.userMessage)
-                        return@launch
-                    }
-                }
-                val myId = auth.currentUser.value?.userId
-                val me = game.players.firstOrNull { it.userId == myId } ?: game.players.firstOrNull()
-                if (me == null) {
-                    state.value = PrepareUiState.ZoneUnavailable
-                    return@launch
-                }
-                if (game.status == GameStatus.CANCELLED || game.status == GameStatus.FINISHED) {
-                    eventChannel.send(PrepareEvent.LeftGame)
-                    return@launch
-                }
-                if (game.status == GameStatus.PLAYING) {
-                    eventChannel.send(PrepareEvent.Started(me.role))
-                    return@launch
-                }
-                val positions = (games.visibleLocations(gameId) as? AppResult.Success)?.value.orEmpty()
-                state.value = PrepareUiState.Ready(
-                    game = game,
-                    me = me,
-                    initialPositions = positions,
-                    millisToStart = (game.startsAtEpochMillis ?: clock.nowMillis()) - clock.nowMillis(),
-                    positionsPartial = positions.size < GameRules.PLAYERS_PER_GAME - 1,
-                )
+            while (isActive && !finished) {
+                render()
                 delay(1_000)
             }
         }
     }
 
-    /** D-02 확인 후: 기권 → 경기 무효 처리. */
+    fun load() {
+        viewModelScope.launch {
+            session.refresh()
+            render()
+        }
+    }
+
+    private suspend fun render() {
+        val s = session.state.value?.takeIf { it.gameId == gameId }
+        val snapshot = s?.snapshot
+        if (snapshot == null) {
+            state.value = s?.syncError?.let { PrepareUiState.Failed(it) } ?: PrepareUiState.Loading
+            return
+        }
+        val game = snapshot.game
+        val me = game.players.firstOrNull { it.userId == auth.currentUser.value?.userId }
+        if (me == null) {
+            state.value = PrepareUiState.ZoneUnavailable
+            return
+        }
+        when {
+            game.isEnded -> finish(PrepareEvent.LeftGame)
+            game.status == GameStatus.PLAYING -> finish(PrepareEvent.Started(me.role))
+            else -> state.value = PrepareUiState.Ready(
+                game = game,
+                me = me,
+                // 준비 단계에도 서버가 역할별로 걸러 준 위치만 쓴다(도둑에게 경찰 위치를 주지 않음).
+                initialPositions = snapshot.locations.filter { it.userId != me.userId },
+                millisToStart = ((game.startsAtEpochMillis ?: clock.nowMillis()) - clock.nowMillis()).coerceAtLeast(0),
+                positionsPartial = snapshot.locations.isEmpty(),
+                myLocation = s.myLocation ?: snapshot.locations.firstOrNull { it.userId == me.userId },
+            )
+        }
+    }
+
+    private suspend fun finish(event: PrepareEvent) {
+        if (finished) return
+        finished = true
+        eventChannel.send(event)
+    }
+
+    /** D-02 확인 후: 기권 → 서버가 경기를 무효 처리한 뒤 결과 화면으로. */
     fun leaveGame() {
         viewModelScope.launch {
-            games.forfeit(gameId)
-            eventChannel.send(PrepareEvent.LeftGame)
+            when (val result = games.forfeit(gameId)) {
+                is AppResult.Success -> {
+                    session.refresh()
+                    finish(PrepareEvent.LeftGame)
+                }
+                is AppResult.Failure -> state.value = PrepareUiState.Failed("나가기 요청 실패: ${result.error.userMessage}")
+            }
         }
     }
 }
@@ -265,7 +287,11 @@ fun ZoneConfirmScreen(
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 if (s.positionsPartial) NoticeBanner("일부 참가자 위치 확인 중")
-                Text("경기 시작 전에는 양 팀 모두 4명의 최초 위치를 확인합니다.", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (s.me.role == PlayerRole.POLICE) "경찰은 모든 참가자의 위치를 볼 수 있습니다." else "도둑은 같은 팀 도둑의 위치만 볼 수 있습니다.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text("제한 시간 ${GameRules.GAME_DURATION_MILLIS / 60_000}분 · 감옥은 구역 중심 · 구역을 벗어나면 경고 후 실격", style = MaterialTheme.typography.bodySmall)
                 val center = GeoPoint(s.game.centerLatitude, s.game.centerLongitude)
                 GameMap(
                     state = GameMapState(
@@ -273,7 +299,7 @@ fun ZoneConfirmScreen(
                         zoneRadiusMeters = s.game.currentRadiusMeters,
                         jail = center,
                         jailRadiusMeters = s.game.jailRadiusMeters,
-                        markers = listOf(MapMarker(s.me.userId, center, "${s.me.nickname}(나)", MarkerKind.ME)) +
+                        markers = listOfNotNull(s.myLocation?.let { MapMarker(s.me.userId, GeoPoint(it.latitude, it.longitude), "${s.me.nickname}(나)", MarkerKind.ME) }) +
                             s.initialPositions.map { location -> location.toMarker(s.game) },
                     ),
                     modifier = Modifier.fillMaxWidth().weight(1f),

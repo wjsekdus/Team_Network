@@ -7,24 +7,20 @@ import com.nettwork.policethief.server.auth.publicAuthRoutes
 import com.nettwork.policethief.server.auth.userRoutes
 import com.nettwork.policethief.server.config.AppConfig
 import com.nettwork.policethief.server.database.AppDatabase
+import com.nettwork.policethief.server.common.GameLock
+import com.nettwork.policethief.server.dev.DevClock
+import com.nettwork.policethief.server.dev.DevToolsService
+import com.nettwork.policethief.server.dev.devToolRoutes
 import com.nettwork.policethief.server.event.ConnectionManager
 import com.nettwork.policethief.server.event.realtimeRoutes
-import com.nettwork.policethief.server.game.CaptureService
-import com.nettwork.policethief.server.game.GameService
-import com.nettwork.policethief.server.game.MatchmakingService
-import com.nettwork.policethief.server.game.NotImplementedCaptureService
-import com.nettwork.policethief.server.game.NotImplementedGameService
-import com.nettwork.policethief.server.game.NotImplementedMatchmakingService
-import com.nettwork.policethief.server.game.NotImplementedQrTokenService
-import com.nettwork.policethief.server.game.NotImplementedRescueService
-import com.nettwork.policethief.server.game.QrTokenService
-import com.nettwork.policethief.server.game.RescueService
+import com.nettwork.policethief.server.game.GameEngine
+import com.nettwork.policethief.server.game.GameStore
 import com.nettwork.policethief.server.game.gameRoutes
 import com.nettwork.policethief.server.health.healthRoutes
 import com.nettwork.policethief.server.location.ExposedLocationRepository
 import com.nettwork.policethief.server.location.LocationService
 import com.nettwork.policethief.server.location.locationRoutes
-import com.nettwork.policethief.server.notification.NotificationService
+import com.nettwork.policethief.server.matchmaking.MatchmakingService
 import com.nettwork.policethief.server.notification.WebSocketNotificationService
 import com.nettwork.policethief.server.plugins.AUTH_BEARER
 import com.nettwork.policethief.server.plugins.configureErrorHandling
@@ -38,6 +34,10 @@ import io.ktor.server.auth.authenticate
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
@@ -45,10 +45,15 @@ import java.time.Duration
 fun main() {
     val log = LoggerFactory.getLogger("Application")
     val config = AppConfig.fromEnvironment()
-    log.info("서버 설정: host={}, port={}, db={}, allowMockLocations={}", config.host, config.port, config.database, config.allowMockLocations)
+    log.info(
+        "서버 설정: host={}, port={}, db={}, allowMockLocations={}, devTools={}, game={}",
+        config.host, config.port, config.database, config.allowMockLocations, config.devToolsEnabled, config.game,
+    )
+    if (config.devToolsEnabled) log.warn("⚠ 개발자 도구(/api/dev, 봇·시간 이동)가 켜져 있습니다. 실제 경기 서버에서는 PNT_DEV_TOOLS=false 로 실행하세요.")
 
     val database = AppDatabase.connect(config.database)
-    val dependencies = ServerDependencies.create(config, database, Clock.systemUTC())
+    val clock: Clock = if (config.devToolsEnabled) DevClock(Clock.systemUTC()) else Clock.systemUTC()
+    val dependencies = ServerDependencies.create(config, database, clock)
 
     embeddedServer(Netty, port = config.port, host = config.host) {
         module(dependencies)
@@ -58,41 +63,51 @@ fun main() {
 
 /**
  * 서버 객체 조립(수동 의존성 주입).
- *
  * 프레임워크 없이 생성자로 연결해 "어떤 객체가 무엇을 쓰는지"를 한 파일에서 볼 수 있게 했다.
- * 향후 기능을 구현하면 NotImplemented... 자리를 실제 구현으로 바꾸기만 하면 된다.
  */
 class ServerDependencies(
+    val config: AppConfig,
     val clock: Clock,
-    val appVersion: String,
     val isDatabaseHealthy: () -> Boolean,
     val authService: AuthService,
     val locationService: LocationService,
     val connections: ConnectionManager,
-    val notifications: NotificationService,
-    val matchmaking: MatchmakingService = NotImplementedMatchmakingService(),
-    val games: GameService = NotImplementedGameService(),
-    val qrTokens: QrTokenService = NotImplementedQrTokenService(),
-    val captures: CaptureService = NotImplementedCaptureService(),
-    val rescues: RescueService = NotImplementedRescueService(),
+    val matchmaking: MatchmakingService,
+    val games: GameEngine,
+    /** 개발자 도구가 켜졌을 때만 존재. */
+    val devTools: DevToolsService?,
 ) {
     companion object {
         fun create(config: AppConfig, database: AppDatabase, clock: Clock): ServerDependencies {
+            require(!config.devToolsEnabled || (config.allowMockLocations && clock is DevClock)) {
+                "PNT_DEV_TOOLS=true 는 PNT_ALLOW_MOCK_LOCATIONS=true 와 DevClock 이 필요합니다."
+            }
             val connections = ConnectionManager()
-            return ServerDependencies(
+            val notifications = WebSocketNotificationService(connections)
+            val lock = GameLock()
+            val store = GameStore()
+            val authService = AuthService(
+                users = ExposedUserRepository(database),
+                tokens = ExposedAuthTokenRepository(database),
                 clock = clock,
-                appVersion = config.appVersion,
-                isDatabaseHealthy = database::isHealthy,
-                authService = AuthService(
-                    users = ExposedUserRepository(database),
-                    tokens = ExposedAuthTokenRepository(database),
-                    clock = clock,
-                    tokenTtl = Duration.ofDays(config.tokenTtlDays),
-                ),
-                locationService = LocationService(ExposedLocationRepository(database), clock, config.allowMockLocations),
-                connections = connections,
-                notifications = WebSocketNotificationService(connections),
+                tokenTtl = Duration.ofDays(config.tokenTtlDays),
             )
+            val matchmaking = MatchmakingService(database, lock, store, clock, config.game, config.allowMockLocations, notifications)
+            val engine = GameEngine(
+                db = database,
+                lock = lock,
+                store = store,
+                matchmaking = matchmaking,
+                notifications = notifications,
+                clock = clock,
+                settings = config.game,
+                // 테스트 좌표 이동은 개발 서버에서만 과속 판정 예외(지시서 20.5). 운영(MOCK 금지)에서는 MOCK 이 아예 들어오지 않는다.
+                mockLocationsExemptFromSpeed = config.allowMockLocations,
+                isUserConnected = connections::isConnected,
+            )
+            val locationService = LocationService(ExposedLocationRepository(database), clock, config.allowMockLocations, engine)
+            val devTools = if (config.devToolsEnabled) DevToolsService(authService, matchmaking, locationService, engine, clock as DevClock) else null
+            return ServerDependencies(config, clock, database::isHealthy, authService, locationService, connections, matchmaking, engine, devTools)
         }
     }
 }
@@ -106,14 +121,38 @@ fun Application.module(deps: ServerDependencies) {
     configureWebSockets()
 
     routing {
-        healthRoutes(deps.isDatabaseHealthy, deps.appVersion, deps.clock)
+        healthRoutes(deps.isDatabaseHealthy, deps.config.appVersion, deps.clock)
         publicAuthRoutes(deps.authService)
 
         authenticate(AUTH_BEARER) {
             userRoutes(deps.authService)
             locationRoutes(deps.locationService)
-            realtimeRoutes(deps.connections, deps.clock)
-            gameRoutes(deps.matchmaking, deps.games, deps.qrTokens, deps.captures, deps.rescues)
+            realtimeRoutes(deps.connections, deps.clock, deps.games)
+            gameRoutes(deps.matchmaking, deps.games)
+            deps.devTools?.let { devToolRoutes(it) }
+        }
+    }
+
+    if (deps.config.schedulerEnabled) startGameScheduler(deps)
+}
+
+/**
+ * 시간 기반 판정 스케줄러. 서버 시작 시 재시작 복구를 한 번 하고, 이후 약 1초마다 tick 한다.
+ * 한 번의 tick 이 실패해도(예: DB 일시 중단) 다음 tick 에서 다시 시도한다. 상태는 DB 에 있으므로 잃지 않는다.
+ */
+private fun Application.startGameScheduler(deps: ServerDependencies) {
+    val log = LoggerFactory.getLogger("GameScheduler")
+    launch {
+        runCatching { deps.games.recoverAfterRestart() }.onFailure { log.error("재시작 복구 실패(다음 tick 에서 계속 진행)", it) }
+        while (isActive) {
+            try {
+                deps.games.tick()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.error("스케줄러 tick 실패: {}", e.message, e)
+            }
+            delay(deps.config.game.schedulerIntervalMillis)
         }
     }
 }

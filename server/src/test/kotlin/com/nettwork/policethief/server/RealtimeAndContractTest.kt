@@ -71,17 +71,20 @@ class RealtimeApiTest {
     }
 }
 
-class NotImplementedContractTest {
+class GameApiContractTest {
     @Test
-    fun futureGameApis_return501_insteadOfFakeSuccess() = serverTest { client ->
+    fun currentGame_withoutGame_isNotFound_withReason() = serverTest { client ->
         val token = client.guestLogin().accessToken
         val response = client.get(ApiPaths.GAMES_CURRENT) { bearerAuth(token) }
-        assertEquals(HttpStatusCode.NotImplemented, response.status)
-        assertEquals(ErrorCode.NOT_IMPLEMENTED, response.body<ErrorResponse>().code)
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        val error = response.body<ErrorResponse>()
+        assertEquals(ErrorCode.NOT_FOUND, error.code)
+        assertEquals("NO_ACTIVE_GAME", error.details["reason"])
     }
 
     @Test
-    fun futureGameApis_stillRequireAuthentication() = serverTest { client ->
+    fun gameApis_requireAuthentication() = serverTest { client ->
         assertEquals(HttpStatusCode.Unauthorized, client.get(ApiPaths.GAMES_CURRENT).status)
+        assertEquals(HttpStatusCode.Unauthorized, client.get(ApiPaths.MATCHMAKING_ME).status)
     }
 }

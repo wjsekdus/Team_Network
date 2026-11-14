@@ -51,9 +51,12 @@ fun HomeScreen(
     onStartMatchmaking: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenPermissions: () -> Unit,
+    onResumeGame: (ResumeTarget) -> Unit = {},
     viewModel: HomeViewModel = koinViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // 앱 재실행·재접속: 서버에 진행 중인 경기가 있으면 홈이 아니라 그 경기 화면으로 돌아간다(지시서 24.3).
+    androidx.compose.runtime.LaunchedEffect(viewModel) { viewModel.resume.collect(onResumeGame) }
     ScreenContainer(Modifier.safeDrawingPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(

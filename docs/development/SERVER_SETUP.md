@@ -1,5 +1,8 @@
 # SERVER_SETUP — 서버 실행과 외부 접속 (Windows 기준)
 
+> **먼저 읽기**: 최신·상세 절차는 [`RUN_GUIDE.md`](RUN_GUIDE.md)(서버 실행, 개발 모드/운영 모드, Cloudflare Tunnel, 4인·1인 테스트 절차)와 [`GAME_CONFIG.md`](GAME_CONFIG.md)(모든 환경 변수)다. **이 문서와 내용이 다르면 RUN_GUIDE.md 를 따른다.**
+> 이 문서에서 오래된 부분: 마이그레이션은 이제 `V1` 과 `V2`(`V2__game_progress.sql`)까지 있고 테이블이 더 많다(`DATABASE.md`), `PNT_APP_VERSION` 기본값은 코드상 `0.2.0`, 게임 관련 `PNT_GAME_*` 변수와 `PNT_DEV_TOOLS` 변수가 추가됐다.
+
 ## 1. PostgreSQL 실행 (셋 중 하나)
 
 ### 방법 A. Docker Desktop (선택)

@@ -53,13 +53,18 @@ class DtoMapperTest {
     @Test
     fun gameDto_mapsPlayersAndStatus() {
         val dto = GameDto(
-            gameId = "g", status = GameStatus.PLAYING, centerLatitude = 1.0, centerLongitude = 2.0,
-            currentRadiusMeters = 500.0, jailRadiusMeters = 10.0, createdAtEpochMillis = 0,
-            players = listOf(GamePlayerDto("p", "경찰", PlayerRole.POLICE, PlayerStatus.ACTIVE)),
+            gameId = "g", status = GameStatus.PLAYING, version = 7, centerLatitude = 1.0, centerLongitude = 2.0,
+            initialRadiusMeters = 500.0, currentRadiusMeters = 400.0, jailRadiusMeters = 10.0, createdAtEpochMillis = 0,
+            startsAtEpochMillis = 30_000, endsAtEpochMillis = 1_830_000, serverTimeEpochMillis = 99,
+            players = listOf(GamePlayerDto("p", "경찰", PlayerRole.POLICE, PlayerStatus.ACTIVE, escortingUserId = "t")),
         )
         val game = dto.toDomain()
         assertEquals(GameStatus.PLAYING, game.status)
         assertEquals(PlayerRole.POLICE, game.player("p")?.role)
+        assertEquals("t", game.player("p")?.escortingUserId)
+        assertEquals(7, game.version)
+        assertEquals(500.0, game.initialRadiusMeters)
+        assertEquals(99, game.serverTimeEpochMillis)
     }
 }
 

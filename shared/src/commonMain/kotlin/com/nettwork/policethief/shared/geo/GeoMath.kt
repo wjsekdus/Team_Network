@@ -43,23 +43,28 @@ object GeoMath {
     }
 
     /**
+     * [start] 에서 방위각 [bearingRadians](북쪽 0, 시계 방향)으로 [distanceMeters] 이동한 지점.
+     * 미션 목표 지점 생성, 원형 구역 그리기, 테스트 좌표 배치에 쓴다.
+     */
+    fun destination(start: GeoPoint, distanceMeters: Double, bearingRadians: Double): GeoPoint {
+        val angularDistance = distanceMeters / EARTH_RADIUS_METERS
+        val lat = start.latitude.toRadians()
+        val lon = start.longitude.toRadians()
+        val pointLat = asin(sin(lat) * cos(angularDistance) + cos(lat) * sin(angularDistance) * cos(bearingRadians))
+        val pointLon = lon + kotlin.math.atan2(
+            sin(bearingRadians) * sin(angularDistance) * cos(lat),
+            cos(angularDistance) - sin(lat) * sin(pointLat),
+        )
+        return GeoPoint(pointLat.toDegrees(), pointLon.toDegrees())
+    }
+
+    /**
      * 중심과 반경으로 원을 근사하는 다각형 꼭짓점 목록(첫 점 = 마지막 점).
      * 지도 SDK 에 원형 구역을 그릴 때 사용한다.
      */
     fun circlePolygon(center: GeoPoint, radiusMeters: Double, segments: Int = 64): List<GeoPoint> {
         require(segments >= 8) { "segments 는 8 이상이어야 합니다." }
-        val angularDistance = radiusMeters / EARTH_RADIUS_METERS
-        val lat = center.latitude.toRadians()
-        val lon = center.longitude.toRadians()
-        val ring = (0 until segments).map { i ->
-            val bearing = 2 * kotlin.math.PI * i / segments
-            val pointLat = asin(sin(lat) * cos(angularDistance) + cos(lat) * sin(angularDistance) * cos(bearing))
-            val pointLon = lon + kotlin.math.atan2(
-                sin(bearing) * sin(angularDistance) * cos(lat),
-                cos(angularDistance) - sin(lat) * sin(pointLat),
-            )
-            GeoPoint(pointLat.toDegrees(), pointLon.toDegrees())
-        }
+        val ring = (0 until segments).map { i -> destination(center, radiusMeters, 2 * kotlin.math.PI * i / segments) }
         return ring + ring.first()
     }
 

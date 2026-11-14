@@ -80,12 +80,17 @@ class SerializationContractTest {
         val game = GameDto(
             gameId = "g-1",
             status = GameStatus.READY,
+            version = 1,
             centerLatitude = 37.0,
             centerLongitude = 127.0,
+            initialRadiusMeters = 500.0,
             currentRadiusMeters = 500.0,
             jailRadiusMeters = 10.0,
             createdAtEpochMillis = 1,
+            startsAtEpochMillis = 30_001,
+            endsAtEpochMillis = 1_830_001,
             players = listOf(GamePlayerDto("u-1", "a", PlayerRole.THIEF, PlayerStatus.ACTIVE)),
+            serverTimeEpochMillis = 1,
         )
         val encoded = ApiJson.encodeToString(GameDto.serializer(), game)
         assertFalse(ApiJson.parseToJsonElement(encoded).jsonObject.containsKey("result"))

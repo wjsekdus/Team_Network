@@ -26,6 +26,8 @@ multiplatform-settings = "1.3.0"
 play-services-location = "21.4.0"
 maplibre-android = "13.7.1"
 zxing = "3.5.4"
+# CameraX: QR 스캔용 카메라 미리보기·프레임 분석(Apache 2.0). 인식은 ZXing(오픈소스)으로 한다.
+camerax = "1.6.2"
 exposed = "1.6.1"
 flyway = "13.12.2"
 postgresql = "42.7.14"
@@ -65,6 +67,9 @@ androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-mani
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "play-services-location" }
 maplibre-android = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibre-android" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
 

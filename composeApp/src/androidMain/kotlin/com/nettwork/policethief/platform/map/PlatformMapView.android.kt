@@ -130,6 +130,8 @@ actual fun PlatformMapView(state: GameMapState, modifier: Modifier, onMapError: 
 }
 
 private const val SRC_ZONE = "pnt-zone"
+private const val SRC_INITIAL_ZONE = "pnt-initial-zone"
+private const val SRC_MISSION = "pnt-mission"
 private const val SRC_JAIL = "pnt-jail"
 private const val SRC_ME = "pnt-me"
 private const val SRC_POLICE = "pnt-police"
@@ -137,9 +139,18 @@ private const val SRC_THIEF = "pnt-thief"
 private val LABEL_FONT = arrayOf("Noto Sans Regular")
 
 private fun addGameLayers(style: Style) {
-    listOf(SRC_ZONE, SRC_JAIL, SRC_ME, SRC_POLICE, SRC_THIEF).forEach { style.addSource(GeoJsonSource(it)) }
+    listOf(SRC_INITIAL_ZONE, SRC_ZONE, SRC_MISSION, SRC_JAIL, SRC_ME, SRC_POLICE, SRC_THIEF).forEach { style.addSource(GeoJsonSource(it)) }
+    style.addLayer(
+        LineLayer("pnt-initial-zone-line", SRC_INITIAL_ZONE).withProperties(
+            PropertyFactory.lineColor(AndroidColor.GRAY),
+            PropertyFactory.lineWidth(1.5f),
+            PropertyFactory.lineDasharray(arrayOf(2f, 2f)),
+        ),
+    )
     style.addLayer(FillLayer("pnt-zone-fill", SRC_ZONE).withProperties(PropertyFactory.fillColor(AndroidColor.WHITE), PropertyFactory.fillOpacity(0.06f)))
     style.addLayer(LineLayer("pnt-zone-line", SRC_ZONE).withProperties(PropertyFactory.lineColor(AndroidColor.WHITE), PropertyFactory.lineWidth(2.5f)))
+    style.addLayer(FillLayer("pnt-mission-fill", SRC_MISSION).withProperties(PropertyFactory.fillColor(MISSION_COLOR), PropertyFactory.fillOpacity(0.3f)))
+    style.addLayer(LineLayer("pnt-mission-line", SRC_MISSION).withProperties(PropertyFactory.lineColor(MISSION_COLOR), PropertyFactory.lineWidth(2f)))
     style.addLayer(FillLayer("pnt-jail-fill", SRC_JAIL).withProperties(PropertyFactory.fillColor(JAIL_COLOR), PropertyFactory.fillOpacity(0.55f)))
     style.addLayer(
         SymbolLayer("pnt-jail-label", SRC_JAIL).withProperties(
@@ -180,6 +191,17 @@ private fun updateGameSources(style: Style, state: GameMapState) {
     style.getSourceAs<GeoJsonSource>(SRC_ZONE)?.setGeoJson(
         state.zonePolygon()?.let { FeatureCollection.fromFeature(Feature.fromGeometry(it.toPolygon())) } ?: FeatureCollection.fromFeatures(emptyList()),
     )
+    val center = state.center
+    val initial = state.initialZoneRadiusMeters?.takeIf { r -> state.zoneRadiusMeters?.let { r > it } == true }
+    style.getSourceAs<GeoJsonSource>(SRC_INITIAL_ZONE)?.setGeoJson(
+        if (center == null || initial == null) FeatureCollection.fromFeatures(emptyList())
+        else FeatureCollection.fromFeature(Feature.fromGeometry(GeoMath.circlePolygon(center, initial).toPolygon())),
+    )
+    val mission = state.mission
+    style.getSourceAs<GeoJsonSource>(SRC_MISSION)?.setGeoJson(
+        if (mission == null) FeatureCollection.fromFeatures(emptyList())
+        else FeatureCollection.fromFeature(Feature.fromGeometry(GeoMath.circlePolygon(mission, state.missionRadiusMeters ?: 30.0, 32).toPolygon())),
+    )
     val jail = state.jail
     style.getSourceAs<GeoJsonSource>(SRC_JAIL)?.setGeoJson(
         if (jail == null) {
@@ -204,4 +226,5 @@ private fun List<GeoPoint>.toPolygon(): Polygon = Polygon.fromLngLats(listOf(map
 private val POLICE_COLOR = AndroidColor.parseColor("#2563EB")
 private val THIEF_COLOR = AndroidColor.parseColor("#FB923C")
 private val JAIL_COLOR = AndroidColor.parseColor("#FACC15")
+private val MISSION_COLOR = AndroidColor.parseColor("#22C55E")
 private val BACKGROUND_COLOR = AndroidColor.parseColor("#0A0E16")

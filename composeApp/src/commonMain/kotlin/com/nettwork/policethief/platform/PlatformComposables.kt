@@ -14,9 +14,17 @@ import androidx.compose.ui.Modifier
 @Composable
 expect fun rememberPermissionRequester(permission: AppPermission, onResult: (granted: Boolean) -> Unit): () -> Unit
 
-/** QR 코드 이미지. Android: ZXing 으로 생성. iOS: TODO(현재 토큰 문자열만 표시). */
+/** QR 코드 이미지. Android: ZXing 으로 생성. iOS: CoreImage CIQRCodeGenerator. */
 @Composable
 expect fun QrCodeImage(content: String, contentDescription: String, modifier: Modifier)
+
+/**
+ * 카메라 미리보기 + QR 인식. 카메라 권한이 있을 때만 호출한다.
+ * 인식할 때마다 [onScanned] 를 부르므로, 중복 요청은 호출하는 쪽(ViewModel)에서 막는다.
+ * Android: CameraX + ZXing, iOS: AVFoundation(AVCaptureMetadataOutput).
+ */
+@Composable
+expect fun QrScannerView(onScanned: (String) -> Unit, modifier: Modifier)
 
 /** 시스템 뒤로가기 가로채기(D-01, D-02 확인 대화상자용). */
 @Composable

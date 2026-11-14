@@ -5,9 +5,17 @@ import com.nettwork.policethief.domain.model.AppError
 import com.nettwork.policethief.domain.model.AppResult
 import com.nettwork.policethief.shared.api.ApiJson
 import com.nettwork.policethief.shared.api.ApiPaths
+import com.nettwork.policethief.shared.dto.DevBotLocationRequest
+import com.nettwork.policethief.shared.dto.DevBotScanRequest
+import com.nettwork.policethief.shared.dto.DevBotsResponse
+import com.nettwork.policethief.shared.dto.DevClockAdvanceRequest
+import com.nettwork.policethief.shared.dto.DevCreateBotsRequest
+import com.nettwork.policethief.shared.dto.DevStatusDto
 import com.nettwork.policethief.shared.dto.ErrorCode
 import com.nettwork.policethief.shared.dto.ErrorResponse
 import com.nettwork.policethief.shared.dto.GameDto
+import com.nettwork.policethief.shared.dto.GameResultDto
+import com.nettwork.policethief.shared.dto.GameStateDto
 import com.nettwork.policethief.shared.dto.GuestLoginRequest
 import com.nettwork.policethief.shared.dto.GuestLoginResponse
 import com.nettwork.policethief.shared.dto.HealthResponse
@@ -74,13 +82,36 @@ class PoliceThiefApi(
     suspend fun sendLocation(request: LocationUpdateRequest): AppResult<LocationDto> =
         send(HttpMethod.Post, ApiPaths.LOCATIONS) { jsonBody(request) }
 
-    // ---- 계약만 정의된 API (현재 서버는 501 → AppError.NotImplemented) ----
+    // ---- 매칭·경기 ----
     suspend fun joinMatchmaking(request: JoinMatchmakingRequest): AppResult<MatchmakingTicketDto> =
         send(HttpMethod.Post, ApiPaths.MATCHMAKING) { jsonBody(request) }
 
+    suspend fun myMatchmaking(): AppResult<MatchmakingTicketDto> = send(HttpMethod.Get, ApiPaths.MATCHMAKING_ME)
+
     suspend fun cancelMatchmaking(): AppResult<Unit> = send(HttpMethod.Delete, ApiPaths.MATCHMAKING_ME)
 
+    suspend fun currentGame(): AppResult<GameDto> = send(HttpMethod.Get, ApiPaths.GAMES_CURRENT)
+
     suspend fun game(gameId: String): AppResult<GameDto> = send(HttpMethod.Get, ApiPaths.game(gameId))
+
+    suspend fun gameState(gameId: String): AppResult<GameStateDto> = send(HttpMethod.Get, ApiPaths.gameState(gameId))
+
+    suspend fun gameResult(gameId: String): AppResult<GameResultDto> = send(HttpMethod.Get, ApiPaths.gameResult(gameId))
+
+    // ---- 개발자 도구(개발 서버에서만 존재, 운영 서버는 404) ----
+    suspend fun devCreateBots(request: DevCreateBotsRequest): AppResult<DevBotsResponse> =
+        send(HttpMethod.Post, ApiPaths.DEV_BOTS) { jsonBody(request) }
+
+    suspend fun devAdvanceClock(millis: Long): AppResult<DevStatusDto> =
+        send(HttpMethod.Post, ApiPaths.DEV_CLOCK_ADVANCE) { jsonBody(DevClockAdvanceRequest(millis)) }
+
+    suspend fun devGameBots(gameId: String): AppResult<DevBotsResponse> = send(HttpMethod.Get, ApiPaths.devGameBots(gameId))
+
+    suspend fun devBotScan(botUserId: String, token: String): AppResult<QrScanResultDto> =
+        send(HttpMethod.Post, ApiPaths.devBotScan(botUserId)) { jsonBody(DevBotScanRequest(token)) }
+
+    suspend fun devMoveBot(botUserId: String, request: DevBotLocationRequest): AppResult<Unit> =
+        send(HttpMethod.Post, ApiPaths.devBotLocation(botUserId)) { jsonBody(request) }
 
     suspend fun visibleLocations(gameId: String): AppResult<VisibleLocationsResponse> =
         send(HttpMethod.Get, ApiPaths.gameVisibleLocations(gameId))
@@ -142,7 +173,7 @@ internal suspend fun HttpResponse.toAppError(): AppError {
         status.value == 401 || error?.code == ErrorCode.UNAUTHORIZED -> AppError.Unauthorized
         error?.code == ErrorCode.NOT_IMPLEMENTED -> AppError.NotImplemented(error.message.substringAfter(": "))
         error?.code == ErrorCode.VALIDATION_FAILED -> AppError.Validation(error.message, error.details)
-        error != null -> AppError.Server(status.value, error.message)
+        error != null -> AppError.Server(status.value, error.message, error.details["reason"])
         else -> AppError.Server(status.value, "서버 오류(HTTP ${status.value})")
     }
 }

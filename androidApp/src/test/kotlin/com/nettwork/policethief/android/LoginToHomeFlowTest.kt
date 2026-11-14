@@ -19,6 +19,7 @@ import com.nettwork.policethief.di.initKoin
 import com.nettwork.policethief.domain.model.PlayerLocation
 import com.nettwork.policethief.platform.AppPermission
 import com.nettwork.policethief.platform.BackgroundLocationController
+import com.nettwork.policethief.platform.GameAlerts
 import com.nettwork.policethief.platform.LocationProvider
 import com.nettwork.policethief.platform.PermissionController
 import com.nettwork.policethief.platform.PermissionState
@@ -113,6 +114,12 @@ class LoginToHomeFlowTest {
                     override val isRunning: StateFlow<Boolean> = MutableStateFlow(false)
                     override fun start() = Unit
                     override fun stop() = Unit
+                }
+            }
+            single<GameAlerts> {
+                object : GameAlerts {
+                    override fun notify(title: String, message: String) = Unit
+                    override fun vibrate() = Unit
                 }
             }
         }

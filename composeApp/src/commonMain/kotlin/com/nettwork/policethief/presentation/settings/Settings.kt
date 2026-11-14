@@ -33,10 +33,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.nettwork.policethief.config.AppConfig
-import com.nettwork.policethief.data.local.DevSettings
-import com.nettwork.policethief.data.local.DevSettingsStore
-import com.nettwork.policethief.data.local.ServerUrlProvider
+import com.nettwork.policethief.domain.model.DevSettings
+import com.nettwork.policethief.domain.model.UserPreferences
+import com.nettwork.policethief.domain.repository.DevSettingsRepository
+import com.nettwork.policethief.domain.repository.ServerAddressProvider
+import com.nettwork.policethief.domain.repository.UserPreferencesRepository
 import com.nettwork.policethief.domain.model.AppResult
+import com.nettwork.policethief.domain.model.map
+import com.nettwork.policethief.domain.repository.DevToolsRepository
+import com.nettwork.policethief.domain.repository.GameSessionRepository
+import com.nettwork.policethief.domain.repository.LocationRepository
 import com.nettwork.policethief.domain.model.RealtimeConnectionState
 import com.nettwork.policethief.domain.model.RealtimeEvent
 import com.nettwork.policethief.domain.model.User
@@ -81,6 +87,8 @@ data class SettingsUiState(
     val isDevBuild: Boolean = false,
     val appVersion: String = "",
     val platformName: String = "",
+    val preferences: UserPreferences = UserPreferences(),
+    val devMessage: String? = null,
 )
 
 sealed interface SettingsEvent {
@@ -94,10 +102,14 @@ class SettingsViewModel(
     private val realtime: RealtimeRepository,
     private val permissions: PermissionController,
     private val background: BackgroundLocationController,
-    private val devSettings: DevSettingsStore,
-    private val urls: ServerUrlProvider,
+    private val devSettings: DevSettingsRepository,
+    private val urls: ServerAddressProvider,
     private val mockController: MockGameController?,
     config: AppConfig,
+    private val preferences: UserPreferencesRepository,
+    private val devTools: DevToolsRepository,
+    private val locations: LocationRepository,
+    private val session: GameSessionRepository,
 ) : ViewModel() {
     private val state = MutableStateFlow(
         SettingsUiState(
@@ -114,6 +126,7 @@ class SettingsViewModel(
 
     init {
         refreshLocalState()
+        viewModelScope.launch { preferences.current.collect { prefs -> state.update { it.copy(preferences = prefs) } } }
         viewModelScope.launch { auth.currentUser.collect { user -> state.update { it.copy(user = user) } } }
         viewModelScope.launch { realtime.connectionState.collect { c -> state.update { it.copy(realtime = c) } } }
         viewModelScope.launch { background.isRunning.collect { running -> state.update { it.copy(backgroundRunning = running) } } }
@@ -124,6 +137,9 @@ class SettingsViewModel(
                     is RealtimeEvent.TestEvent -> "test_event #${event.sequence}: ${event.message}"
                     is RealtimeEvent.Pong -> "pong ${event.roundTripMillis}ms"
                     is RealtimeEvent.Game -> "game_event ${event.event.type}"
+                    is RealtimeEvent.Matchmaking -> "matchmaking ${event.type} (${event.ticket.nearbyWaitingCount}명)"
+                    is RealtimeEvent.Location -> "player_location ${event.location.userId?.take(8)}…"
+                    is RealtimeEvent.SessionReplaced -> "session_replaced: ${event.message}"
                     is RealtimeEvent.ServerError -> "error: ${event.message}"
                 }
                 state.update { it.copy(realtimeEvents = (listOf("${formatClockTime(event.receivedAtEpochMillis)} $line") + it.realtimeEvents).take(5)) }
@@ -172,8 +188,54 @@ class SettingsViewModel(
         refreshLocalState()
     }
 
+    fun updatePreferences(transform: (UserPreferences) -> UserPreferences) = preferences.update(transform)
+
+    // ---- 개발자 도구(개발 서버 PNT_DEV_TOOLS=true 에서만 동작) ----
+
+    /** 내 현재 위치 주변에 봇 3명을 만들어 매칭 대기열에 넣는다. 이후 [매칭 찾기]를 누르면 4명이 모인다. */
+    fun createBots() = devAction("봇 생성") {
+        val near = (locations.fetchCurrentLocation() as? AppResult.Success)?.value ?: locations.lastLocation.value
+        devTools.createBots(3, near).map { "봇 ${it}명을 만들었습니다. 홈에서 [매칭 찾기]를 누르세요." }
+    }
+
+    /** 서버 시계를 앞으로 돌린다(준비 30초·구역 축소·30분 종료 확인용). */
+    fun advanceClock(millis: Long) = devAction("시간 이동") {
+        devTools.advanceClock(millis).map { "서버 시간이 ${it / 1000}초 앞으로 이동한 상태입니다." }.also { session.refresh() }
+    }
+
+    /** 현재 경기의 봇 중 하나로 다른 봇 QR 을 스캔(봇 경찰이 봇 도둑 체포 / 봇 도둑이 수감된 봇 도둑 구출). */
+    fun botScan() = devAction("봇 스캔") {
+        val gameId = session.state.value?.gameId ?: return@devAction AppResult.Success("진행 중인 경기가 없습니다.")
+        when (val bots = devTools.gameBots(gameId)) {
+            is AppResult.Failure -> bots
+            is AppResult.Success -> {
+                val police = bots.value.firstOrNull { it.role == PlayerRole.POLICE }
+                val target = bots.value.firstOrNull { it.role == PlayerRole.THIEF && it.qrToken != null }
+                if (police == null || target == null) {
+                    AppResult.Success("스캔할 봇 경찰/도둑 조합이 없습니다.")
+                } else {
+                    devTools.botScan(police.userId, target.qrToken!!).map { r ->
+                        if (r.accepted) "봇 ${police.nickname} → ${target.nickname} 체포" else "거절: ${r.rejectReason}"
+                    }.also { session.refresh() }
+                }
+            }
+        }
+    }
+
+    private fun devAction(name: String, block: suspend () -> AppResult<String>) {
+        state.update { it.copy(devMessage = "$name 중…") }
+        viewModelScope.launch {
+            val message = when (val result = block()) {
+                is AppResult.Success -> result.value
+                is AppResult.Failure -> "$name 실패: ${result.error.userMessage} (서버가 PNT_DEV_TOOLS=true 인지 확인)"
+            }
+            state.update { it.copy(devMessage = message) }
+        }
+    }
+
     fun logout() {
         viewModelScope.launch {
+            session.stop()
             background.stop()
             realtime.disconnect()
             auth.logout()
@@ -242,13 +304,27 @@ fun SettingsScreen(
                 SecondaryActionButton("설정 열기", viewModel::openAppSettings)
             }
             if (state.backgroundSupported) {
-                ToggleRow("백그라운드 위치 공유(테스트)", state.backgroundRunning) { viewModel.toggleBackground() }
-                Text("화면이 꺼져도 약 15초마다 위치를 서버로 보냅니다. OS 정책상 주기가 보장되지 않습니다.", style = MaterialTheme.typography.bodySmall)
+                ToggleRow("경기 중 백그라운드 위치 공유 자동 시작", state.preferences.backgroundLocation) { checked ->
+                    viewModel.updatePreferences { it.copy(backgroundLocation = checked) }
+                }
+                ToggleRow("백그라운드 위치 공유 (지금 켜기/끄기)", state.backgroundRunning) { viewModel.toggleBackground() }
+                Text("화면이 꺼져도 약 15초마다 위치를 서버로 보냅니다. OS 정책상 주기가 보장되지 않습니다. 경기가 끝나면 자동으로 꺼집니다.", style = MaterialTheme.typography.bodySmall)
             } else {
-                Text("이 플랫폼은 백그라운드 위치 공유가 아직 구현되지 않았습니다.", style = MaterialTheme.typography.bodySmall)
+                Text("이 플랫폼은 백그라운드 위치 공유를 지원하지 않습니다.", style = MaterialTheme.typography.bodySmall)
             }
         }
-        if (state.isDevBuild) DeveloperSection(state.dev, viewModel)
+        SectionCard {
+            Text("경기 알림·절전", style = MaterialTheme.typography.titleMedium)
+            ToggleRow("중요 이벤트 시스템 알림", state.preferences.systemNotifications) { checked ->
+                viewModel.updatePreferences { it.copy(systemNotifications = checked) }
+            }
+            ToggleRow("진동", state.preferences.vibration) { checked -> viewModel.updatePreferences { it.copy(vibration = checked) } }
+            ToggleRow("경기 시작 시 절전 모드 자동 실행", state.preferences.autoPowerSave) { checked ->
+                viewModel.updatePreferences { it.copy(autoPowerSave = checked) }
+            }
+            Text("알림 권한을 거부해도 앱 안 배너로 알려 드립니다. 절전 모드는 지도 그리기만 줄이고 위치 공유는 유지합니다.", style = MaterialTheme.typography.bodySmall)
+        }
+        if (state.isDevBuild) DeveloperSection(state.dev, state.devMessage, viewModel)
         SectionCard {
             Text("앱 정보", style = MaterialTheme.typography.titleMedium)
             Text("버전 ${state.appVersion} · ${state.platformName}${if (state.isDevBuild) " · 개발 빌드" else ""}")
@@ -261,7 +337,7 @@ fun SettingsScreen(
 
 /** 개발자 테스트 모드. 개발 빌드에서만 보인다. */
 @Composable
-private fun DeveloperSection(dev: DevSettings, viewModel: SettingsViewModel) {
+private fun DeveloperSection(dev: DevSettings, devMessage: String?, viewModel: SettingsViewModel) {
     var serverUrl by remember(dev.serverUrlOverride) { mutableStateOf(dev.serverUrlOverride) }
     var latText by remember(dev.mockLatitude) { mutableStateOf(dev.mockLatitude.toString()) }
     var lonText by remember(dev.mockLongitude) { mutableStateOf(dev.mockLongitude.toString()) }
@@ -298,8 +374,21 @@ private fun DeveloperSection(dev: DevSettings, viewModel: SettingsViewModel) {
         }
         Text("테스트 좌표는 source=MOCK 으로 전송되어 서버에서 실제 위치와 구분됩니다(서버 PNT_ALLOW_MOCK_LOCATIONS=true 필요).", style = MaterialTheme.typography.bodySmall)
 
-        ToggleRow("게임 화면 Mock 데이터 사용 (앱 재시작 후 적용)", dev.useMockGameData) { checked -> viewModel.updateDev { it.copy(useMockGameData = checked) } }
-        Text("끄면 실제 서버 API 를 호출합니다. 현재 서버 게임 API 는 미구현(501)입니다.", style = MaterialTheme.typography.bodySmall)
+        Text("서버 개발자 도구 (서버 PNT_DEV_TOOLS=true 일 때만 동작)", style = MaterialTheme.typography.bodyMedium)
+        Text("휴대폰 1대로 4인 경기를 시험할 때: [봇 3명 만들기] → 홈에서 [매칭 찾기] → 시간 이동으로 준비·종료 확인.", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryActionButton("봇 3명 만들기", viewModel::createBots)
+            SecondaryActionButton("봇 체포 스캔", viewModel::botScan)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryActionButton("+30초", { viewModel.advanceClock(30_000) })
+            SecondaryActionButton("+5분", { viewModel.advanceClock(5 * 60_000) })
+            SecondaryActionButton("+30분", { viewModel.advanceClock(30 * 60_000) })
+        }
+        devMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AppColors.Mock) }
+
+        ToggleRow("서버 없이 Mock 경기로 화면만 확인 (앱 재시작 후 적용)", dev.useMockGameData) { checked -> viewModel.updateDev { it.copy(useMockGameData = checked) } }
+        Text("켜면 서버 판정 없이 가상 참가자로 화면 흐름만 봅니다. 실제 경기는 꺼 둔 상태(기본)에서 진행하세요.", style = MaterialTheme.typography.bodySmall)
         Text("Mock 역할 지정", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(null to "무작위", PlayerRole.POLICE to "경찰", PlayerRole.THIEF to "도둑").forEach { (role, label) ->

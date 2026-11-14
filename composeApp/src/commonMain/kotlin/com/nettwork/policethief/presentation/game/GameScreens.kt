@@ -81,7 +81,14 @@ fun GameMapScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showLeaveDialog by remember { mutableStateOf(false) }
     var showMockPanel by remember { mutableStateOf(false) }
-    LaunchedEffect(viewModel) { viewModel.events.collect { onGameEnded() } }
+    LaunchedEffect(viewModel) {
+        viewModel.events.collect { event ->
+            when (event) {
+                GameMapEvent.GameEnded -> onGameEnded()
+                GameMapEvent.OpenPowerSave -> onOpenPowerSave()
+            }
+        }
+    }
     PlatformBackHandler(enabled = true) { showLeaveDialog = true }
     if (showLeaveDialog) {
         ConfirmDialog(
@@ -147,12 +154,30 @@ fun GameMapScreen(
 private fun StatusLine(state: GameMapUiState, role: PlayerRole) {
     val game = state.game ?: return
     val thieves = game.players.filter { it.role == PlayerRole.THIEF }
+    if (game.status == com.nettwork.policethief.shared.model.GameStatus.READY) {
+        NoticeBanner("준비 중 · 경기 시작까지 ${formatRemaining((game.startsAtEpochMillis ?: state.nowEpochMillis) - state.nowEpochMillis)}")
+    }
     val text = if (role == PlayerRole.POLICE) {
         "체포 ${state.capturedCount}/${GameRules.THIEF_COUNT} · 경고 ${state.me?.warningCount ?: 0}/${GameRules.SPEED_WARNINGS_TO_DISQUALIFY}"
     } else {
-        "도둑 " + thieves.joinToString(" · ") { "${it.nickname} ${it.status.label()}" }
+        "도둑 " + thieves.joinToString(" · ") { "${it.nickname} ${it.status.label()}" } +
+            " · 경고 ${state.me?.warningCount ?: 0}/${GameRules.SPEED_WARNINGS_TO_DISQUALIFY}"
     }
     Text(text, style = MaterialTheme.typography.bodyLarge)
+    val zone = buildString {
+        append("구역 ${game.currentRadiusMeters.toInt()}m")
+        game.nextZoneShrink?.let { append(" · ${formatRemaining(it.scheduledAtEpochMillis - state.nowEpochMillis)} 뒤 ${it.radiusMeters.toInt()}m 로 축소") }
+    }
+    Text(zone, style = MaterialTheme.typography.bodyMedium)
+    if (state.isOutOfZone) {
+        NoticeBanner("⚠ 게임 구역 밖입니다! 바로 구역 안으로 돌아오세요. 계속 벗어나면 실격(무효 경기)됩니다.", color = AppColors.Error)
+    }
+    game.activeMission?.let { mission ->
+        NoticeBanner(
+            "미션: 초록 원 안으로 이동 · 남은 시간 ${formatRemaining(mission.deadlineAtEpochMillis - state.nowEpochMillis)}",
+            color = AppColors.Success,
+        )
+    }
     state.lastSentAtEpochMillis?.let {
         Text("내 위치 전송: ${formatClockTime(it)}" + (state.sendError?.let { e -> " (최근 전송 실패: $e)" } ?: ""), style = MaterialTheme.typography.bodySmall)
     } ?: state.sendError?.let { Text("위치 전송 실패: $it", style = MaterialTheme.typography.bodySmall, color = AppColors.Error) }
@@ -169,12 +194,20 @@ private fun GameMapUiState.toMapState(): GameMapState {
     val game = game ?: return GameMapState(center = null)
     val center = GeoPoint(game.centerLatitude, game.centerLongitude)
     val meMarker = myLocation?.let { MapMarker("me", GeoPoint(it.latitude, it.longitude), "나", MarkerKind.ME) }
+    val mission = game.activeMission
     return GameMapState(
         center = center,
         zoneRadiusMeters = game.currentRadiusMeters,
         jail = center,
         jailRadiusMeters = game.jailRadiusMeters,
-        markers = listOfNotNull(meMarker) + others.map { it.toMarker(game) },
+        // 오래된(30초 초과) 좌표는 "현재 위치"로 오해하지 않도록 라벨에 마지막 수신 시각을 붙인다.
+        markers = listOfNotNull(meMarker) + others.map { location ->
+            val marker = location.toMarker(game)
+            if (isStale(location)) marker.copy(label = "${marker.label} (${formatClockTime(location.timestampEpochMillis)} 기준)") else marker
+        },
+        initialZoneRadiusMeters = game.initialRadiusMeters,
+        mission = mission?.let { GeoPoint(it.targetLatitude, it.targetLongitude) },
+        missionRadiusMeters = mission?.targetRadiusMeters,
     )
 }
 
@@ -195,6 +228,11 @@ private fun BottomActions(
         }
         PrimaryActionButton("QR 스캔해서 체포", onOpenQrScan, height = gameButton, modifier = Modifier.testTag("captureButton"))
     } else {
+        when (state.me?.status) {
+            PlayerStatus.ESCORTED -> NoticeBanner("체포됨 · 경찰과 함께 감옥으로 이동 중입니다. 호송 중에는 구출될 수 없습니다.")
+            PlayerStatus.JAILED -> NoticeBanner("수감 중 · 동료 도둑이 내 QR 을 스캔하면 구출됩니다. [내 QR 보기]를 눌러 보여 주세요.")
+            else -> Unit
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PrimaryActionButton(
                 "내 QR 보기",
@@ -263,8 +301,14 @@ private fun EscortDetails(escorted: GamePlayer, state: EscortUiState, viewModel:
             state.distanceToJailMeters?.let { "감옥까지 ${formatMeters(it)} (반경 ${state.jailRadiusMeters.toInt()}m 안으로)" } ?: "내 위치를 확인하는 중…",
             style = MaterialTheme.typography.headlineMedium,
         )
+        state.escortedDistanceToJailMeters?.let {
+            Text("${escorted.nickname} → 감옥 ${formatMeters(it)}", style = MaterialTheme.typography.bodyLarge, color = AppColors.Thief)
+        }
         Text("경찰과 도둑 두 사람 모두 감옥 반경 안에 들어오면 서버가 수감을 확정합니다.", style = MaterialTheme.typography.bodyMedium)
         if (state.isInsideJail) NoticeBanner("감옥 도착 확인 중 — 서버 승인 전까지 수감 완료가 아닙니다")
+        if (state.jailPendingAtEpochMillis != null) {
+            NoticeBanner("GPS 정확도가 낮아 수감 판정을 보류했습니다. 하늘이 보이는 곳에서 잠시 멈춰 GPS 신호를 다시 잡아 주세요.", color = AppColors.Error)
+        }
         state.locationError?.let { NoticeBanner("위치 확인 실패: $it", color = AppColors.Error) }
         if (viewModel.mockController != null) SecondaryActionButton("Mock: 서버 수감 확정", viewModel::mockJailArrival)
     }
@@ -287,6 +331,19 @@ fun PowerSaveScreen(gameId: String, onClose: () -> Unit) {
             style = MaterialTheme.typography.displayMedium,
             color = AppColors.TextSecondary,
         )
+        Text("체포 ${state.capturedCount}/${GameRules.THIEF_COUNT}" + (state.myStatus?.let { " · 내 상태 ${it.label()}" } ?: ""), color = AppColors.TextSecondary)
+        state.nextShrinkAtEpochMillis?.let {
+            Text("다음 구역 축소까지 ${formatRemaining(it - state.nowEpochMillis)}", color = AppColors.TextSecondary)
+        }
+        Text(
+            when {
+                state.gameEnded -> "경기가 끝났습니다 · 화면을 눌러 결과를 확인하세요"
+                state.syncError != null -> "서버 연결 불안정 · ${state.syncError.orEmpty().lineSequence().first()}"
+                else -> "서버 연결 정상" + (state.syncedAtEpochMillis?.let { " · ${formatClockTime(it)} 동기화" } ?: "")
+            },
+            color = if (state.syncError != null) AppColors.Error else AppColors.TextSecondary,
+            textAlign = TextAlign.Center,
+        )
         Text(
             state.lastSentAtEpochMillis?.let { "마지막 위치 전송 ${formatClockTime(it)}" } ?: "아직 위치를 전송하지 않았습니다",
             color = AppColors.TextSecondary,
@@ -299,8 +356,9 @@ fun PowerSaveScreen(gameId: String, onClose: () -> Unit) {
             )
             Text("OS 정책에 따라 15초 주기가 지켜지지 않을 수 있습니다.", style = MaterialTheme.typography.bodySmall, color = AppColors.TextSecondary)
         } else {
-            Text("이 플랫폼은 백그라운드 위치 공유가 아직 구현되지 않았습니다.", style = MaterialTheme.typography.bodySmall, color = AppColors.Error)
+            Text("이 플랫폼은 백그라운드 위치 공유를 지원하지 않습니다.", style = MaterialTheme.typography.bodySmall, color = AppColors.Error)
         }
+        Text("절전 모드는 지도 그리기와 화면 갱신만 줄입니다. 위치 공유와 경기 알림은 계속됩니다.", style = MaterialTheme.typography.bodySmall, color = AppColors.TextSecondary, textAlign = TextAlign.Center)
         Text("화면을 누르면 지도로 돌아갑니다", style = MaterialTheme.typography.bodySmall, color = AppColors.TextSecondary)
     }
 }

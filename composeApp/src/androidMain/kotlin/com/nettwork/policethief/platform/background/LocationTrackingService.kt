@@ -113,7 +113,13 @@ class AndroidBackgroundLocationController(private val context: Context) : Backgr
     override val isRunning: StateFlow<Boolean> = LocationTrackingService.running.asStateFlow()
 
     override fun start() {
-        ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java))
+        // Android 12+ 는 앱이 백그라운드일 때 Foreground Service 시작을 막는다(ForegroundServiceStartNotAllowedException).
+        // 그때는 앱 화면이 보이는 동안의 위치 전송(GameSessionRepository)으로 대신하고, 앱 복귀 후 다시 시도된다.
+        try {
+            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java))
+        } catch (e: IllegalStateException) {
+            android.util.Log.w("BackgroundLocation", "백그라운드 위치 서비스를 시작하지 못했습니다: ${e.message}")
+        }
     }
 
     override fun stop() {

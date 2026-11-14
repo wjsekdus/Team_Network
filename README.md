@@ -5,19 +5,24 @@
 
 고급모바일프로그래밍 팀 **넷트워크** 프로젝트. 현재 위치 반경 500m 안의 사용자 4명을 자동으로 묶어 경찰 2 : 도둑 2 로 30분 동안 실제 공간에서 경찰과 도둑 게임을 진행하는 Android / iOS 앱과 Ktor 서버입니다.
 
-> 이 저장소는 **초기 기반 버전(v0.1.0)** 입니다. 공통 구조와 기본 기능(게스트 로그인, 서버 통신, WebSocket, GPS·테스트 좌표, 지도, 전체 화면 UI)은 동작하고, 매칭·체포·구출·승패 같은 핵심 게임 로직은 **인터페이스와 Mock 만 준비된 상태**입니다. 남은 작업은 [`docs/development/TODO.md`](docs/development/TODO.md) 에 있습니다.
+> 이 브랜치(`prototype/ai-complete`)는 **B 방식 전체 구현 버전(v0.2.0)** 입니다. 4인 위치 매칭, 역할 배정, 준비 30초, 역할별 위치 공유, QR 체포·호송·감옥 자동 수감·구출, 미션·구역 축소·과속, 승패·무효 판정, 재접속·서버 재시작 복구를 **서버가 판정**하고 앱이 실제 서버 상태로 화면을 그립니다. 자동 테스트 137개와 실서버(PostgreSQL) 4인 시나리오는 통과했지만, **실기기·iOS 빌드·Cloudflare Tunnel 은 아직 검증하지 않았습니다.** 결과와 미검증 항목은 [`docs/testing/TEST_REPORT.md`](docs/testing/TEST_REPORT.md) 에 있습니다. Mock 경기는 서버 없이 화면만 볼 때 쓰는 개발 모드 전용 기능입니다.
 
 ## 문서 목록
 
 | 문서 | 내용 |
 |---|---|
-| [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | 전체 구조, Clean Architecture, MVVM, 데이터 흐름 |
-| [DATABASE.md](docs/architecture/DATABASE.md) | 테이블, ERD, 인덱스, 저장 정책 |
-| [API.md](docs/api/API.md) | REST / WebSocket 계약 (구현됨 / 예정 구분) |
+| [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | 전체 구조, Clean Architecture, MVVM, Koin, 서버 패키지, 클라이언트 동기화 |
+| [DATABASE.md](docs/architecture/DATABASE.md) | 테이블(V1+V2), ERD, 고유 제약, 트랜잭션, 재시작 복구 |
+| [API.md](docs/api/API.md) | REST / WebSocket / 개발 API 계약, 이벤트·공개 범위 |
+| [GAME_LOGIC.md](docs/development/GAME_LOGIC.md) | 매칭·역할·상태 머신·체포/구출·승패·동시성 규칙 |
+| [GAME_CONFIG.md](docs/development/GAME_CONFIG.md) | 확정 규칙 vs 임시(PROVISIONAL) 설정과 환경 변수 |
+| [RUN_GUIDE.md](docs/development/RUN_GUIDE.md) | Windows 에서 서버·앱 실행, 4인/1인(봇) 테스트 절차 |
+| [SERVER_SETUP.md](docs/development/SERVER_SETUP.md) | (이전 서버 설정 문서 — 다르면 RUN_GUIDE.md 를 따름) |
+| [CODE_GUIDE.md](docs/development/CODE_GUIDE.md) | 코드 학습 가이드(핵심 클래스, 요청 흐름, 기능 변경 방법, 테스트 위치) |
+| [TEAM_ANALYSIS_GUIDE.md](docs/development/TEAM_ANALYSIS_GUIDE.md) | 4명 영역 분담, 버그 후보, 실습 과제 |
 | [UI_STRUCTURE.md](docs/development/UI_STRUCTURE.md) | 화면별 Composable, ViewModel, 상태, Mock 여부 |
-| [CODE_GUIDE.md](docs/development/CODE_GUIDE.md) | 코드 학습 가이드(패키지·클래스·호출 흐름) |
-| [SERVER_SETUP.md](docs/development/SERVER_SETUP.md) | PostgreSQL, 서버 실행, 환경 변수, Cloudflare Tunnel |
 | [VERSIONS.md](docs/development/VERSIONS.md) | 라이브러리 버전과 선정 근거 |
+| [IMPLEMENTATION_AUDIT.md](docs/IMPLEMENTATION_AUDIT.md) | 구현 점검 기록 |
 | [TODO.md](docs/development/TODO.md) | 미구현 기능과 4인 분담안 |
 | [TEST_REPORT.md](docs/testing/TEST_REPORT.md) | 실제 실행한 테스트 결과 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 브랜치·커밋·PR·리뷰 규칙 |

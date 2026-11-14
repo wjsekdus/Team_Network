@@ -1,6 +1,10 @@
 package com.nettwork.policethief
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import com.nettwork.policethief.presentation.components.NoticeHost
 import com.nettwork.policethief.presentation.navigation.AppNavHost
 import com.nettwork.policethief.presentation.theme.PoliceThiefTheme
 
@@ -8,6 +12,10 @@ import com.nettwork.policethief.presentation.theme.PoliceThiefTheme
 @Composable
 fun App() {
     PoliceThiefTheme {
-        AppNavHost()
+        Box(Modifier.fillMaxSize()) {
+            AppNavHost()
+            // 경기 이벤트 배너: 어느 화면에 있든 위에 겹쳐 보인다(알림 권한이 없어도 동작).
+            NoticeHost()
+        }
     }
 }

@@ -45,8 +45,17 @@ interface SecureTokenStorage {
 }
 
 /**
+ * 경기 알림(시스템 알림 + 진동). 알림 권한이 거부되어도 예외 없이 무시해야 한다(앱 안 배너는 따로 표시된다).
+ * Android: NotificationManager + Vibrator, iOS: UNUserNotificationCenter + 시스템 진동.
+ */
+interface GameAlerts {
+    fun notify(title: String, message: String)
+    fun vibrate()
+}
+
+/**
  * 화면이 꺼져도 위치를 주기적으로 보내는 백그라운드 위치 서비스.
- * Android: Foreground Service, iOS: Core Location 백그라운드 업데이트(미구현).
+ * Android: Foreground Service, iOS: Core Location 백그라운드 위치 업데이트.
  * OS 정책 때문에 15초 주기가 보장되지 않는다.
  */
 interface BackgroundLocationController {

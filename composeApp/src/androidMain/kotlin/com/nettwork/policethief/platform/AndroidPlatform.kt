@@ -35,6 +35,7 @@ fun androidPlatformModule(context: Context) = module {
     single<PermissionController> { AndroidPermissionController(appContext) }
     single<LocationProvider>(REAL_LOCATION_PROVIDER) { RealLocationProvider(appContext) }
     single<BackgroundLocationController> { AndroidBackgroundLocationController(appContext) }
+    single<GameAlerts> { AndroidGameAlerts(appContext) }
 }
 
 /** 권한 이름 매핑. */

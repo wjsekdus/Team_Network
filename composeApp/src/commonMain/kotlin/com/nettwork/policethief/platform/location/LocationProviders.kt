@@ -2,8 +2,8 @@ package com.nettwork.policethief.platform.location
 
 import com.nettwork.policethief.config.AppConfig
 import com.nettwork.policethief.core.EpochClock
-import com.nettwork.policethief.data.local.DevSettingsStore
 import com.nettwork.policethief.domain.model.PlayerLocation
+import com.nettwork.policethief.domain.repository.DevSettingsRepository
 import com.nettwork.policethief.platform.LocationProvider
 import com.nettwork.policethief.shared.model.LocationSource
 
@@ -12,7 +12,7 @@ import com.nettwork.policethief.shared.model.LocationSource
  * source = MOCK 으로 표시되어 서버가 실제 위치와 구분해 저장한다.
  */
 class MockLocationProvider(
-    private val devSettings: DevSettingsStore,
+    private val devSettings: DevSettingsRepository,
     private val clock: EpochClock,
 ) : LocationProvider {
     override suspend fun getCurrentLocation(): PlayerLocation {
@@ -35,7 +35,7 @@ class MockLocationProvider(
 class DevAwareLocationProvider(
     private val real: LocationProvider,
     private val mock: LocationProvider,
-    private val devSettings: DevSettingsStore,
+    private val devSettings: DevSettingsRepository,
     private val config: AppConfig,
 ) : LocationProvider {
     override suspend fun getCurrentLocation(): PlayerLocation =

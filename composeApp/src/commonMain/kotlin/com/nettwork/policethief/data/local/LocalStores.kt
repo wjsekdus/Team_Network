@@ -1,7 +1,12 @@
 package com.nettwork.policethief.data.local
 
 import com.nettwork.policethief.config.AppConfig
+import com.nettwork.policethief.domain.model.DevSettings
 import com.nettwork.policethief.domain.model.User
+import com.nettwork.policethief.domain.model.UserPreferences
+import com.nettwork.policethief.domain.repository.DevSettingsRepository
+import com.nettwork.policethief.domain.repository.ServerAddressProvider
+import com.nettwork.policethief.domain.repository.UserPreferencesRepository
 import com.nettwork.policethief.platform.SecureTokenStorage
 import com.nettwork.policethief.shared.model.PlayerRole
 import com.russhwolf.settings.Settings
@@ -65,33 +70,14 @@ class SessionLocalDataSource(
     }
 }
 
-/** 개발자 설정 값. 개발 빌드(AppConfig.isDevBuild)에서만 효과가 있다. */
-data class DevSettings(
-    val useMockLocation: Boolean = false,
-    val mockLatitude: Double = DEFAULT_MOCK_LATITUDE,
-    val mockLongitude: Double = DEFAULT_MOCK_LONGITUDE,
-    val mockAccuracyMeters: Double = 5.0,
-    /** 비어 있으면 빌드 기본 주소 사용. */
-    val serverUrlOverride: String = "",
-    /** true: 게임 화면이 Mock 데이터 사용 / false: 실제 서버 API 호출(현재 501). 앱 재시작 후 적용. */
-    val useMockGameData: Boolean = true,
-    val mockRole: PlayerRole? = null,
-) {
-    companion object {
-        // 기본 테스트 좌표: 서울특별시청
-        const val DEFAULT_MOCK_LATITUDE = 37.5665
-        const val DEFAULT_MOCK_LONGITUDE = 126.9780
-    }
-}
-
 /**
  * 개발자 설정 저장소. 일반 사용자 빌드(isDevBuild=false)에서는 항상 기본값(실제 GPS, 기본 서버 주소)을 돌려준다.
  */
-class DevSettingsStore(private val settings: Settings, private val config: AppConfig) {
+class DevSettingsStore(private val settings: Settings, private val config: AppConfig) : DevSettingsRepository {
     private val state = MutableStateFlow(load())
-    val current: StateFlow<DevSettings> = state.asStateFlow()
+    override val current: StateFlow<DevSettings> = state.asStateFlow()
 
-    fun update(transform: (DevSettings) -> DevSettings) {
+    override fun update(transform: (DevSettings) -> DevSettings) {
         if (!config.isDevBuild) return
         val next = transform(state.value)
         settings.putBoolean(KEY_USE_MOCK_LOCATION, next.useMockLocation)
@@ -112,7 +98,7 @@ class DevSettingsStore(private val settings: Settings, private val config: AppCo
             mockLongitude = settings.getDouble(KEY_MOCK_LON, DevSettings.DEFAULT_MOCK_LONGITUDE),
             mockAccuracyMeters = settings.getDouble(KEY_MOCK_ACCURACY, 5.0),
             serverUrlOverride = settings.getString(KEY_SERVER_URL, ""),
-            useMockGameData = settings.getBoolean(KEY_USE_MOCK_GAME, true),
+            useMockGameData = settings.getBoolean(KEY_USE_MOCK_GAME, false),
             mockRole = settings.getString(KEY_MOCK_ROLE, "").takeIf { it.isNotEmpty() }?.let(PlayerRole::valueOf),
         )
     }
@@ -128,9 +114,37 @@ class DevSettingsStore(private val settings: Settings, private val config: AppCo
     }
 }
 
+class UserPreferencesStore(private val settings: Settings) : UserPreferencesRepository {
+    private val state = MutableStateFlow(
+        UserPreferences(
+            autoPowerSave = settings.getBoolean(KEY_AUTO_POWER_SAVE, false),
+            vibration = settings.getBoolean(KEY_VIBRATION, true),
+            systemNotifications = settings.getBoolean(KEY_SYSTEM_NOTIFICATIONS, true),
+            backgroundLocation = settings.getBoolean(KEY_BACKGROUND_LOCATION, true),
+        ),
+    )
+    override val current: StateFlow<UserPreferences> = state.asStateFlow()
+
+    override fun update(transform: (UserPreferences) -> UserPreferences) {
+        val next = transform(state.value)
+        settings.putBoolean(KEY_AUTO_POWER_SAVE, next.autoPowerSave)
+        settings.putBoolean(KEY_VIBRATION, next.vibration)
+        settings.putBoolean(KEY_SYSTEM_NOTIFICATIONS, next.systemNotifications)
+        settings.putBoolean(KEY_BACKGROUND_LOCATION, next.backgroundLocation)
+        state.value = next
+    }
+
+    private companion object {
+        const val KEY_AUTO_POWER_SAVE = "prefs.autoPowerSave"
+        const val KEY_VIBRATION = "prefs.vibration"
+        const val KEY_SYSTEM_NOTIFICATIONS = "prefs.systemNotifications"
+        const val KEY_BACKGROUND_LOCATION = "prefs.backgroundLocation"
+    }
+}
+
 /** 지금 사용할 서버 주소. 개발 빌드에서 설정 화면 값이 있으면 그것을, 없으면 빌드 기본값을 쓴다. */
-class ServerUrlProvider(private val config: AppConfig, private val devSettings: DevSettingsStore) {
-    fun baseUrl(): String {
+class ServerUrlProvider(private val config: AppConfig, private val devSettings: DevSettingsRepository) : ServerAddressProvider {
+    override fun baseUrl(): String {
         val override = devSettings.current.value.serverUrlOverride.takeIf { config.isDevBuild && it.isNotBlank() }
         return (override ?: config.defaultServerUrl).trim().trimEnd('/')
     }

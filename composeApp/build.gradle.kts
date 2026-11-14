@@ -69,6 +69,9 @@ kotlin {
             implementation(libs.play.services.location)
             implementation(libs.maplibre.android)
             implementation(libs.zxing.core)
+            implementation(libs.androidx.camera.camera2)
+            implementation(libs.androidx.camera.lifecycle)
+            implementation(libs.androidx.camera.view)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

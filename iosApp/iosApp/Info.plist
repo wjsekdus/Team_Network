@@ -28,6 +28,11 @@
 	<string>화면이 꺼져 있어도 경기 중 위치 공유를 유지하기 위해 사용합니다.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>경찰의 체포, 도둑의 동료 구출 시 QR 코드를 스캔하는 데 사용합니다.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<!-- 경기 중 화면이 꺼지거나 다른 앱으로 전환해도 위치 공유를 이어가기 위함 -->
+		<string>location</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- 로컬 개발 서버(http://localhost)만 허용. 외부 접속은 HTTPS(Cloudflare Tunnel)를 사용한다. -->
