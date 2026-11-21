@@ -1,0 +1,23 @@
+# 선택 사항: Docker Desktop 이 있으면 PostgreSQL 을 한 줄로 실행할 수 있다.
+#   docker compose up -d
+# Docker 가 없어도 된다. 설치형 PostgreSQL 사용법은 docs/development/SERVER_SETUP.md 참고.
+#
+# 보안: 포트를 127.0.0.1 에만 열어 같은 PC 의 서버만 접속하게 한다.
+# Cloudflare Tunnel 로 공개하는 것은 Ktor 서버(8080)뿐이며 DB 포트는 절대 공개하지 않는다.
+services:
+  postgres:
+    image: postgres:17
+    container_name: police-thief-postgres
+    environment:
+      POSTGRES_DB: police_thief
+      POSTGRES_USER: police_thief
+      # server/.env 의 PNT_DB_PASSWORD 와 같은 값을 쉘 환경 변수로 넘긴다. (미설정 시 실행 거부)
+      POSTGRES_PASSWORD: ${PNT_DB_PASSWORD:?PNT_DB_PASSWORD 환경 변수를 설정하세요}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - police-thief-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  police-thief-pgdata:

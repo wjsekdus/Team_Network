@@ -1,0 +1,24 @@
+# iOS 빌드(수동 실행 전용) — ⚠️ 아직 한 번도 실행·검증되지 않았다.
+# macOS Runner 와 Xcode 가 필요하다. Mac 개발 환경으로 로컬 빌드를 먼저 확인한 뒤
+# 아래 on: 에 pull_request 를 추가해 PR 마다 실행하도록 바꾼다. (docs/testing/TEST_REPORT.md 참고)
+name: iOS Build (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - name: Kotlin iOS 프레임워크 링크
+        run: ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 --stacktrace
+      - name: Xcode 시뮬레이터 빌드 (서명 없음)
+        run: cd iosApp && xcodebuild -project iosApp.xcodeproj -scheme iosApp -configuration Debug -sdk iphonesimulator -arch arm64 CODE_SIGNING_ALLOWED=NO build
