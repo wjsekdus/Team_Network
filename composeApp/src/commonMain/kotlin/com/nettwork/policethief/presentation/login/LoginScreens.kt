@@ -3,7 +3,6 @@ package com.nettwork.policethief.presentation.login
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -11,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,7 +67,7 @@ fun LoginScreen(onLoggedIn: (needsPermission: Boolean) -> Unit, viewModel: Login
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event -> if (event is LoginEvent.LoggedIn) onLoggedIn(event.needsPermission) }
     }
-    ScreenContainer(Modifier.safeDrawingPadding().imePadding().verticalScroll(rememberScrollState())) {
+    ScreenContainer(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(48.dp))
         ScreenTitle("경찰과 도둑")
         Text(
@@ -90,6 +90,10 @@ fun LoginScreen(onLoggedIn: (needsPermission: Boolean) -> Unit, viewModel: Login
             isError = state.fieldError != null,
             singleLine = true,
             enabled = !state.isSubmitting,
+            colors = OutlinedTextFieldDefaults.colors(
+                disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { viewModel.submit() }),
             modifier = Modifier.fillMaxWidth().testTag("nicknameField").semantics {
@@ -117,5 +121,6 @@ fun LoginScreen(onLoggedIn: (needsPermission: Boolean) -> Unit, viewModel: Login
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(Modifier.height(LocalDimens.current.itemGap))
     }
 }

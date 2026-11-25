@@ -127,7 +127,7 @@ fun GameResultScreen(gameId: String, onGoHome: () -> Unit) {
                     resultHeadline(game.result),
                     style = MaterialTheme.typography.displayMedium,
                     color = when (game.result) {
-                        GameResult.POLICE_WIN -> AppColors.Police
+                        GameResult.POLICE_WIN -> AppColors.PoliceText
                         GameResult.THIEF_WIN -> AppColors.Thief
                         else -> AppColors.TextPrimary
                     },

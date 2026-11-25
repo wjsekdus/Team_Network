@@ -18,6 +18,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -26,6 +27,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.nettwork.policethief.presentation.theme.AppColors
 import com.nettwork.policethief.shared.geo.GeoMath
 import com.nettwork.policethief.shared.geo.GeoPoint
 import org.maplibre.android.MapLibre
@@ -157,16 +159,18 @@ private fun addGameLayers(style: Style) {
             PropertyFactory.textField("감옥"),
             PropertyFactory.textFont(LABEL_FONT),
             PropertyFactory.textColor(JAIL_COLOR),
+            PropertyFactory.textHaloColor(BACKGROUND_COLOR),
+            PropertyFactory.textHaloWidth(1.5f),
             PropertyFactory.textSize(14f),
             PropertyFactory.textOffset(arrayOf(0f, 1.4f)),
         ),
     )
-    addMarkerLayers(style, SRC_POLICE, POLICE_COLOR)
+    addMarkerLayers(style, SRC_POLICE, POLICE_COLOR, labelColor = AppColors.PoliceText.toArgb())
     addMarkerLayers(style, SRC_THIEF, THIEF_COLOR)
     addMarkerLayers(style, SRC_ME, AndroidColor.WHITE)
 }
 
-private fun addMarkerLayers(style: Style, source: String, color: Int) {
+private fun addMarkerLayers(style: Style, source: String, color: Int, labelColor: Int = color) {
     style.addLayer(
         CircleLayer("$source-circle", source).withProperties(
             PropertyFactory.circleColor(color),
@@ -179,7 +183,9 @@ private fun addMarkerLayers(style: Style, source: String, color: Int) {
         SymbolLayer("$source-label", source).withProperties(
             PropertyFactory.textField(Expression.get("label")),
             PropertyFactory.textFont(LABEL_FONT),
-            PropertyFactory.textColor(color),
+            PropertyFactory.textColor(labelColor),
+            PropertyFactory.textHaloColor(BACKGROUND_COLOR),
+            PropertyFactory.textHaloWidth(1.5f),
             PropertyFactory.textSize(13f),
             PropertyFactory.textOffset(arrayOf(0f, 1.3f)),
             PropertyFactory.textAllowOverlap(true),
