@@ -14,8 +14,7 @@ import androidx.compose.ui.unit.sp
 
 /*
  * UI 설계 보고서 "공통 UI 규격"의 어두운 화면 팔레트.
- * 접근성: 파랑(#2563EB) 글자는 어두운 배경에서 명암비 3.74:1 로 미달이므로 글자색이 아니라
- *        버튼/도형 배경으로만 쓰고, 그 위 글자는 흰색으로 표시한다.
+ * 경찰 파랑은 밝은 글자색(PoliceText)과 흰 글자가 올라가는 배경색(Police)을 구분한다.
  */
 object AppColors {
     val Background = Color(0xFF0A0E16)
@@ -24,6 +23,7 @@ object AppColors {
     val TextPrimary = Color(0xFFE6EDF7)
     val TextSecondary = Color(0xFFA7B4C8)
     val Police = Color(0xFF2563EB)
+    val PoliceText = Color(0xFF93C5FD)
     val Thief = Color(0xFFFB923C)
     val Success = Color(0xFF4ADE80)
     val Error = Color(0xFFF87171)
@@ -63,11 +63,12 @@ private val AppTypography = Typography(
 )
 
 private val DarkColors = darkColorScheme(
-    primary = AppColors.Police,
-    onPrimary = AppColors.OnAccent,
+    primary = AppColors.PoliceText,
+    onPrimary = AppColors.Background,
     secondary = AppColors.Thief,
     onSecondary = AppColors.OnThief,
     tertiary = AppColors.Jail,
+    onTertiary = AppColors.Background,
     background = AppColors.Background,
     onBackground = AppColors.TextPrimary,
     surface = AppColors.Surface,

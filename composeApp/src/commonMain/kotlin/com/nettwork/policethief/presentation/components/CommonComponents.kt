@@ -62,7 +62,12 @@ fun PrimaryActionButton(
         enabled = enabled,
         modifier = modifier.fillMaxWidth().heightIn(min = height),
         shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = containerColor, contentColor = contentColor),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
     }
@@ -76,6 +81,9 @@ fun SecondaryActionButton(text: String, onClick: () -> Unit, modifier: Modifier 
         enabled = enabled,
         modifier = modifier.heightIn(min = LocalDimens.current.minTouch),
         shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
     ) {
         Text(text, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
     }
@@ -234,7 +242,10 @@ fun ConfirmDialog(
 /** 화면 공통 틀: 좌우 16dp 여백, 최대 폭 제한(태블릿·가로 화면에서 너무 넓어지지 않게). */
 @Composable
 fun ScreenContainer(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.TopCenter) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).then(modifier),
+        contentAlignment = Alignment.TopCenter,
+    ) {
         Column(
             modifier = Modifier.widthIn(max = 600.dp).fillMaxSize().padding(horizontal = LocalDimens.current.screenPadding),
             verticalArrangement = Arrangement.spacedBy(LocalDimens.current.itemGap),

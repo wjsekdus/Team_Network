@@ -216,7 +216,7 @@ fun RoleRevealScreen(gameId: String, onContinue: () -> Unit, onLeftGame: () -> U
             is PrepareUiState.Failed -> ErrorState("준비 정보를 확인하지 못했습니다.\n${s.message}", onPrimary = viewModel::load)
             PrepareUiState.ZoneUnavailable -> EmptyState("게임 구역을 만들 수 없습니다.")
             is PrepareUiState.Ready -> {
-                val color = if (s.me.role == PlayerRole.POLICE) AppColors.Police else AppColors.Thief
+                val color = if (s.me.role == PlayerRole.POLICE) AppColors.PoliceText else AppColors.Thief
                 Text(
                     text = if (s.me.role == PlayerRole.POLICE) "당신은 경찰입니다" else "당신은 도둑입니다",
                     style = MaterialTheme.typography.displayMedium,
