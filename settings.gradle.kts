@@ -25,6 +25,9 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        maven("https://repository.map.naver.com/archive/maven") {
+            content { includeGroupByRegex("com[.]naver[.]maps([.].*)?") }
+        }
     }
 }
 
