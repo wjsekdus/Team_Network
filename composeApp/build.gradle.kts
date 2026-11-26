@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 /*
  * composeApp: Android 와 iOS 가 함께 쓰는 앱 본체.
  *   commonMain  : presentation(화면·ViewModel) / domain / data / platform(인터페이스) / di
- *   androidMain : Android 구현(GPS, 권한, Keystore, MapLibre 지도, Foreground Service, QR 렌더링)
+ *   androidMain : Android 구현(GPS, 권한, Keystore, 네이버 지도, Foreground Service, QR 렌더링)
  *   iosMain     : iOS 구현(Core Location, Keychain 등)  ※ Windows 에서는 컴파일되지 않음(macOS 필요)
  * Android 실행 파일(APK)은 :androidApp 모듈이 이 라이브러리를 감싸서 만든다(AGP 9 의 KMP 구조).
  */
@@ -67,7 +67,7 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
             implementation(libs.play.services.location)
-            implementation(libs.maplibre.android)
+            implementation(libs.naver.maps)
             implementation(libs.zxing.core)
             implementation(libs.androidx.camera.camera2)
             implementation(libs.androidx.camera.lifecycle)

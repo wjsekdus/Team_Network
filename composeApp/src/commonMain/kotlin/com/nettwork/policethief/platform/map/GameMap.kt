@@ -30,7 +30,7 @@ import kotlin.math.min
 /*
  * 지도 추상화.
  * 화면(ViewModel)은 [GameMapState] 만 만들고, 실제 그리기는 플랫폼별 [PlatformMapView] 가 한다.
- *   Android: MapLibre Native + OpenFreeMap 타일
+ *   Android: 네이버 지도 SDK
  *   iOS    : 현재는 [SchematicMap](타일 없는 도식 지도). MapLibre iOS / MapKit 연동은 TODO.
  * 지도 SDK 문제로 빌드가 깨지지 않도록 지도 SDK 코드는 androidMain 에만 있다.
  */
@@ -70,10 +70,6 @@ data class GameMapState(
     }
 }
 
-/** 지도 타일 출처 표시(OpenStreetMap / OpenMapTiles / OpenFreeMap 이용 조건). */
-const val MAP_ATTRIBUTION = "© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors"
-const val MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/dark"
-
 /** 플랫폼 지도. 지도 로딩 실패 시 [onMapError] 로 알려 공통 코드가 도식 지도로 대체한다. */
 @Composable
 expect fun PlatformMapView(state: GameMapState, modifier: Modifier, onMapError: (String) -> Unit)
@@ -94,12 +90,7 @@ fun GameMap(state: GameMapState, modifier: Modifier = Modifier) {
                 modifier = Modifier.align(Alignment.TopCenter).padding(8.dp).background(AppColors.Jail).padding(4.dp),
             )
         }
-        Text(
-            MAP_ATTRIBUTION,
-            style = MaterialTheme.typography.bodySmall,
-            color = AppColors.TextSecondary,
-            modifier = Modifier.align(Alignment.BottomStart).background(AppColors.Background.copy(alpha = 0.7f)).padding(4.dp),
-        )
+
     }
 }
 

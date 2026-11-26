@@ -26,6 +26,7 @@ android {
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
+        manifestPlaceholders["naverMapClientId"] = localProperties.getProperty("naver.map.clientId", "").trim()
         applicationId = "com.nettwork.policethief"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
